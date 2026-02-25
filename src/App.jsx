@@ -12,23 +12,100 @@ import store from './store';
 import ScrollToTop from './components/ScrollToTop';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
 import Layout from './components/Layout/Layout';
+import CkManagerLayout from './components/Layout/CkManagerLayout';
 import Home from './pages/Home/Home';
 import Login from './pages/Auth/Login';
 import NotFound from './pages/NotFound/NotFound';
+import RoleDashboard from './pages/Roles/RoleDashboard';
+// Admin pages
+import AdminUsersPage from './pages/Roles/AdminUsersPage';
+import AdminStoresPage from './pages/Roles/AdminStoresPage';
+import AdminSettingsPage from './pages/Roles/AdminSettingsPage';
+import AdminReportsPage from './pages/Roles/AdminReportsPage';
+// Manager pages
+import ManagerProductsPage from './pages/Roles/ManagerProductsPage';
+import ManagerInventoryPage from './pages/Roles/ManagerInventoryPage';
+import ManagerReportsPage from './pages/Roles/ManagerReportsPage';
+// Franchise store pages
+import FranchiseOrdersPage from './pages/Roles/FranchiseOrdersPage';
+import FranchiseInventoryPage from './pages/Roles/FranchiseInventoryPage';
+// Central kitchen pages
+import CentralOrdersPage from './pages/Roles/CentralOrdersPage';
+import CentralProductionPage from './pages/Roles/CentralProductionPage';
+import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
+// Supply coordinator pages
+import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
+import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
+import SupplyIssuesPage from './pages/Roles/SupplyIssuesPage';
 
 
 function AppContent() {
   return (
     <Routes>
+      {/* Khu vực public (trang giới thiệu) */}
       <Route path='/' element={<Layout />}>
         <Route index element={<Home />} />
-        {/* TODO: Thêm các routes khác từ frontend/src/App.jsx */}
-        {/* 
-        <Route path='courses' element={<CourseListPage />} />
-        <Route path='courses/:id' element={<CourseLessonPage />} />
-        <Route path='blog' element={<Blog />} />
-        ... các routes khác
-        */}
+      </Route>
+
+      {/* Khu vực CK Manager với sidebar, yêu cầu đăng nhập + đúng role */}
+      <Route
+        path='/app'
+        element={
+          <RoleProtectedRoute
+            allowedRoles={[
+              'ADMIN',
+              'MANAGER',
+              'SUPPLY_COORDINATOR',
+              'CENTRAL_KITCHEN_STAFF',
+              'FRANCHISE_STORE_STAFF',
+            ]}
+          >
+            <CkManagerLayout />
+          </RoleProtectedRoute>
+        }
+      >
+        <Route index element={<RoleDashboard />} />
+        <Route path='dashboard' element={<RoleDashboard />} />
+
+        {/* Admin routes */}
+        <Route path='admin'>
+          <Route path='dashboard' element={<RoleDashboard />} />
+          <Route path='users' element={<AdminUsersPage />} />
+          <Route path='stores' element={<AdminStoresPage />} />
+          <Route path='settings' element={<AdminSettingsPage />} />
+          <Route path='reports' element={<AdminReportsPage />} />
+        </Route>
+
+        {/* Manager routes */}
+        <Route path='manager'>
+          <Route path='dashboard' element={<RoleDashboard />} />
+          <Route path='products' element={<ManagerProductsPage />} />
+          <Route path='inventory' element={<ManagerInventoryPage />} />
+          <Route path='reports' element={<ManagerReportsPage />} />
+        </Route>
+
+        {/* Central Kitchen routes */}
+        <Route path='central'>
+          <Route path='dashboard' element={<RoleDashboard />} />
+          <Route path='orders' element={<CentralOrdersPage />} />
+          <Route path='production' element={<CentralProductionPage />} />
+          <Route path='materials' element={<CentralMaterialsPage />} />
+        </Route>
+
+        {/* Supply Coordinator routes */}
+        <Route path='supply'>
+          <Route path='dashboard' element={<RoleDashboard />} />
+          <Route path='orders' element={<SupplyOrdersPage />} />
+          <Route path='delivery' element={<SupplyDeliveryPage />} />
+          <Route path='issues' element={<SupplyIssuesPage />} />
+        </Route>
+
+        {/* Franchise Store routes */}
+        <Route path='store'>
+          <Route path='dashboard' element={<RoleDashboard />} />
+          <Route path='orders' element={<FranchiseOrdersPage />} />
+          <Route path='inventory' element={<FranchiseInventoryPage />} />
+        </Route>
       </Route>
 
       <Route path='/login' element={<Login />} />

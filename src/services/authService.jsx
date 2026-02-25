@@ -2,7 +2,7 @@ import axios from 'axios';
 import axiosInstance from '../utils/axiosInstance';
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
 export const authService = {
   // Token management
@@ -68,26 +68,30 @@ export const authService = {
     }
   },
 
-  login: async (email, password) => {
+  login: async (username, password) => {
     try {
       const response = await axios.post(
         `${API_BASE_URL}/auth/login`,
-        { email, password },
+        { username, password },
         { withCredentials: true }
       );
 
-      if (response.data.data?.accessToken) {
-        authService.setAccessToken(response.data.data.accessToken);
+      const { success, message, data } = response.data || {};
+      const { token, user } = data || {};
+
+      if (success && token) {
+        authService.setAccessToken(token);
       }
 
-      if (response.data.data?.user) {
-        authService.setUser(response.data.data.user);
+      if (success && user) {
+        authService.setUser(user);
       }
 
       return {
-        success: true,
-        user: response.data.data.user,
-        message: response.data.message,
+        success: !!success,
+        user,
+        message: message || 'Đăng nhập thành công',
+        data,
       };
     } catch (error) {
       if (error.response?.data) {
