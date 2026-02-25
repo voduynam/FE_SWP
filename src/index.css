@@ -50,3 +50,65 @@
     background: #9ca3af;
   }
 }
+
+
+@layer utilities {
+
+
+  .gradient-hero {
+    background: linear-gradient(135deg,
+        #1e3a5f 0%,
+        #2c4a6f 40%,
+        #8b5e2e 100%);
+  }
+
+  /* Logo box */
+  .gradient-secondary {
+    background: linear-gradient(135deg, #f59e0b, #fb923c);
+  }
+
+  /* Card */
+  .glass-card {
+    @apply bg-gray-100 rounded-xl shadow-xl border border-gray-200;
+  }
+
+  /* Input */
+  .input-field {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 transition;
+  }
+
+  /* Button */
+  .btn-secondary {
+    @apply w-full rounded-lg bg-orange-500 text-white py-2.5 font-medium hover:bg-orange-600 active:scale-[0.98] transition shadow-md;
+  }
+
+  /* Border custom */
+  .border-border {
+    @apply border-gray-300;
+  }
+
+  .text-muted-foreground {
+    @apply text-gray-500;
+  }
+
+  .text-destructive {
+    @apply text-red-500;
+  }
+
+  /* Animation */
+  .animate-slide-up {
+    animation: slideUp 0.5s ease forwards;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

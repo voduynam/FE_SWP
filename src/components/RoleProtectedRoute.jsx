@@ -21,8 +21,16 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
     return <Navigate to='/login' state={{ from: location }} replace />;
   }
   // Check if user has required role
-  if (allowedRoles.length > 0 && user?.roleId) {
-    const hasPermission = allowedRoles.includes(user.roleId.roleName);
+  if (allowedRoles.length > 0 && user) {
+    const roleCodes = Array.isArray(user.roles)
+      ? user.roles.map(r => r.code)
+      : [];
+
+    const legacyRoleName = user.roleId?.roleName;
+
+    const hasPermission =
+      roleCodes.some(code => allowedRoles.includes(code)) ||
+      (legacyRoleName && allowedRoles.includes(legacyRoleName));
     if (!hasPermission) {
       // Redirect to unauthorized page or dashboard
       return (
