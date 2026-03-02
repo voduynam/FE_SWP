@@ -1,0 +1,81 @@
+@import 'tailwindcss';
+
+@layer base {
+:root {
+    --background: 210 20% 98%;
+    --foreground: 215 25% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+    --primary: 215 50% 23%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 32 95% 55%;
+    --secondary-foreground: 215 25% 15%;
+    --muted: 210 15% 92%;
+    --muted-foreground: 215 15% 45%;
+    --accent: 180 45% 45%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 215 50% 23%;
+  --radius: 0.625rem;
+    --sidebar-background: 215 50% 18%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 32 95% 55%;
+    --sidebar-primary-foreground: 215 25% 15%;
+    --sidebar-accent: 215 45% 25%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 215 40% 25%;
+    --sidebar-ring: 32 95% 55%;
+}
+
+.dark {
+    --background: 215 30% 10%;
+    --foreground: 210 20% 92%;
+    --card: 215 30% 14%;
+    --card-foreground: 210 20% 92%;
+    --popover: 215 30% 14%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 32 95% 55%;
+    --primary-foreground: 215 25% 15%;
+    --secondary: 215 45% 25%;
+    --secondary-foreground: 210 20% 92%;
+    --muted: 215 30% 18%;
+    --muted-foreground: 215 15% 55%;
+    --accent: 180 45% 45%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 30% 22%;
+    --input: 215 30% 22%;
+    --ring: 32 95% 55%;
+    --sidebar-background: 215 35% 8%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 32 95% 55%;
+    --sidebar-primary-foreground: 215 25% 15%;
+    --sidebar-accent: 215 35% 15%;
+    --sidebar-accent-foreground: 210 20% 85%;
+    --sidebar-border: 215 30% 18%;
+    --sidebar-ring: 32 95% 55%;
+}
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
