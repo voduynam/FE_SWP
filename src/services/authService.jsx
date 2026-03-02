@@ -1,8 +1,10 @@
 import axios from 'axios';
 import axiosInstance from '../utils/axiosInstance';
 
+// Base URL cho BE. Khuyến nghị đặt VITE_API_URL = 'http://localhost:5001'
+// để các endpoint dùng đúng path /api/... theo swagger.
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+  import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export const authService = {
   // Token management
@@ -71,7 +73,7 @@ export const authService = {
   login: async (username, password) => {
     try {
       const response = await axios.post(
-        `${API_BASE_URL}/auth/login`,
+        `${API_BASE_URL}/api/auth/login`,
         { username, password },
         { withCredentials: true }
       );
@@ -79,17 +81,50 @@ export const authService = {
       const { success, message, data } = response.data || {};
       const { token, user } = data || {};
 
+      // Chuẩn hóa cấu trúc roles từ backend để FE dùng thống nhất
+      let normalizedUser = user;
+      if (user && Array.isArray(user.roles)) {
+        const normalizedRoles = user.roles.map(role => {
+          const rawName = role.role_name || role.name || '';
+          let code = role.code;
+
+          if (!code && rawName) {
+            const upper = rawName.toUpperCase();
+            if (upper.includes('ADMIN')) code = 'ADMIN';
+            else if (upper.includes('MANAGER')) code = 'MANAGER';
+            else if (upper.includes('SUPPLY')) code = 'SUPPLY_COORDINATOR';
+            else if (upper.includes('CENTRAL')) code = 'CENTRAL_KITCHEN_STAFF';
+            else if (upper.includes('FRANCHISE') || upper.includes('STORE'))
+              code = 'FRANCHISE_STORE_STAFF';
+            else code = upper.replace(/\s+/g, '_');
+          }
+
+          return {
+            ...role,
+            id: role.role_id || role.id,
+            name: rawName,
+            code,
+          };
+        });
+
+        normalizedUser = {
+          ...user,
+          full_name: user.full_name || user.name,
+          roles: normalizedRoles,
+        };
+      }
+
       if (success && token) {
         authService.setAccessToken(token);
       }
 
       if (success && user) {
-        authService.setUser(user);
+        authService.setUser(normalizedUser);
       }
 
       return {
         success: !!success,
-        user,
+        user: normalizedUser,
         message: message || 'Đăng nhập thành công',
         data,
       };
