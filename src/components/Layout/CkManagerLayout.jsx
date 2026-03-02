@@ -11,6 +11,7 @@ const mapRoleCodesToSidebarRole = (roles) => {
   if (codes.includes("SUPPLY_COORDINATOR")) return "supply_coordinator";
   if (codes.includes("CENTRAL_KITCHEN_STAFF")) return "central_kitchen";
   if (codes.includes("FRANCHISE_STORE_STAFF")) return "franchise_staff";
+  if (codes.includes("DRIVER")) return "driver";
 
   return "franchise_staff";
 };
@@ -28,14 +29,13 @@ const CkManagerLayout = () => {
         userRole={sidebarRole}
         userName={displayName}
         onLogout={logout}
+        isCollapsed={isCollapsed}
+        setIsCollapsed={setIsCollapsed}
       />
       <main
-        className={`
-          transition-all duration-300
-          ${isCollapsed ? "lg:ml-20" : "lg:ml-72"}
-        `}
+        className="flex-1 min-w-0 overflow-auto transition-all duration-300"
       >
-        <div className="p-4 lg:p-6">
+        <div className="w-full p-4 lg:p-6 xl:p-8">
           <Outlet />
         </div>
       </main>

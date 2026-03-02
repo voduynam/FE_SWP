@@ -27,3 +27,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Backup folders
+FE_backup_*
+*_backup_*
+
+# Other projects/references
+KitchenManagement_FE/
+remix-of-kitchen-hub/
+/components/
+
+# Build outputs
+dist/
+build/

@@ -1,6 +1,6 @@
 export default function ManagerDashboard() {
   return (
-    <div className='container mx-auto px-4 py-8'>
+    <div className='space-y-4 animate-fade-in'>
       <h1 className='text-2xl font-bold mb-4'>Trang quản lý vận hành (Manager)</h1>
       <p className='mb-4'>
         Đây là trang dành cho <strong>Quản lý vận hành</strong>. Tại đây bạn có

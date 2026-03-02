@@ -1,6 +1,6 @@
 export default function SupplyCoordinatorDashboard() {
   return (
-    <div className='container mx-auto px-4 py-8'>
+    <div className='space-y-4 animate-fade-in'>
       <h1 className='text-2xl font-bold mb-4'>
         Trang điều phối cung ứng (Supply Coordinator)
       </h1>

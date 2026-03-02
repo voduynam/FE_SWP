@@ -7,10 +7,12 @@ import {
 } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { EnrolledCoursesProvider } from './contexts/EnrolledCoursesContext';
+import { DeliveryProvider } from './contexts/DeliveryContext';
 import { Provider } from 'react-redux';
 import store from './store';
 import ScrollToTop from './components/ScrollToTop';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
+import RedirectRoute from './components/RedirectRoute';
 import Layout from './components/Layout/Layout';
 import CkManagerLayout from './components/Layout/CkManagerLayout';
 import Home from './pages/Home/Home';
@@ -37,13 +39,18 @@ import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
 import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
 import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
 import SupplyIssuesPage from './pages/Roles/SupplyIssuesPage';
+import DriverDashboard from './pages/Dashboards/DriverDashboard';
+import Delivery from './pages/Delivery/Delivery';
 
 
 function AppContent() {
   return (
     <Routes>
-      {/* Khu vực public (trang giới thiệu) */}
-      <Route path='/' element={<Layout />}>
+      {/* Root route - redirect to login if not authenticated, otherwise to dashboard */}
+      <Route path='/' element={<RedirectRoute />} />
+      
+      {/* Khu vực public (trang giới thiệu) - chỉ dùng cho các route khác nếu cần */}
+      <Route path='/home' element={<Layout />}>
         <Route index element={<Home />} />
       </Route>
 
@@ -58,6 +65,7 @@ function AppContent() {
               'SUPPLY_COORDINATOR',
               'CENTRAL_KITCHEN_STAFF',
               'FRANCHISE_STORE_STAFF',
+              'DRIVER',
             ]}
           >
             <CkManagerLayout />
@@ -106,6 +114,12 @@ function AppContent() {
           <Route path='orders' element={<FranchiseOrdersPage />} />
           <Route path='inventory' element={<FranchiseInventoryPage />} />
         </Route>
+
+        {/* Driver routes */}
+        <Route path='driver'>
+          <Route path='dashboard' element={<DriverDashboard />} />
+          <Route path='delivery' element={<Delivery />} />
+        </Route>
       </Route>
 
       <Route path='/login' element={<Login />} />
@@ -122,9 +136,11 @@ function App() {
       <Router>
         <ScrollToTop />
         <AuthProvider>
-          <EnrolledCoursesProvider>
-            <AppContent />
-          </EnrolledCoursesProvider>
+          <DeliveryProvider>
+            <EnrolledCoursesProvider>
+              <AppContent />
+            </EnrolledCoursesProvider>
+          </DeliveryProvider>
         </AuthProvider>
       </Router>
     </Provider>

@@ -4,6 +4,7 @@ import ManagerDashboard from './ManagerDashboard';
 import SupplyCoordinatorDashboard from './SupplyCoordinatorDashboard';
 import CentralKitchenDashboard from './CentralKitchenDashboard';
 import FranchiseStoreDashboard from './FranchiseStoreDashboard';
+import DriverDashboard from '../Dashboards/DriverDashboard';
 
 const RoleDashboard = () => {
   const { user } = useAuth();
@@ -29,8 +30,12 @@ const RoleDashboard = () => {
     return <FranchiseStoreDashboard />;
   }
 
+  if (codes.includes('DRIVER')) {
+    return <DriverDashboard />;
+  }
+
   return (
-    <div className='container mx-auto px-4 py-8'>
+    <div className='space-y-4 animate-fade-in'>
       <h1 className='text-2xl font-bold mb-4'>Dashboard</h1>
       <p>Vai trò tài khoản chưa được cấu hình để hiển thị dashboard phù hợp.</p>
     </div>

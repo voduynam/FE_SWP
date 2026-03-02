@@ -108,89 +108,42 @@ const menuItems = [
 const menuByRole = {
   admin: [
     { title: "Dashboard", icon: LayoutDashboard, path: "/app/admin/dashboard" },
+    { title: "Đơn hàng", icon: ClipboardList, path: "/app/dashboard" },
+    { title: "Sản phẩm", icon: Package, path: "/app/manager/products" },
+    { title: "Kho hàng", icon: Warehouse, path: "/app/manager/inventory" },
+    { title: "Vận chuyển", icon: TruckIcon, path: "/app/supply/delivery" },
+    { title: "Báo cáo", icon: BarChart3, path: "/app/admin/reports" },
+    { title: "Cửa hàng", icon: Store, path: "/app/admin/stores" },
     { title: "Người dùng", icon: Users, path: "/app/admin/users" },
-    {
-      title: "Cửa hàng & bếp trung tâm",
-      icon: Store,
-      path: "/app/admin/stores",
-    },
-    { title: "Cài đặt hệ thống", icon: Settings, path: "/app/admin/settings" },
-    { title: "Báo cáo tổng hợp", icon: BarChart3, path: "/app/admin/reports" },
+    { title: "Cài đặt", icon: Settings, path: "/app/admin/settings" },
   ],
   manager: [
-    {
-      title: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/app/manager/dashboard",
-    },
-    {
-      title: "Sản phẩm & công thức",
-      icon: Package,
-      path: "/app/manager/products",
-    },
-    {
-      title: "Tồn kho hệ thống",
-      icon: Warehouse,
-      path: "/app/manager/inventory",
-    },
-    {
-      title: "Báo cáo & hiệu suất",
-      icon: BarChart3,
-      path: "/app/manager/reports",
-    },
+    { title: "Dashboard", icon: LayoutDashboard, path: "/app/manager/dashboard" },
+    { title: "Đơn hàng", icon: ClipboardList, path: "/app/dashboard" },
+    { title: "Sản phẩm", icon: Package, path: "/app/manager/products" },
+    { title: "Kho hàng", icon: Warehouse, path: "/app/manager/inventory" },
+    { title: "Vận chuyển", icon: TruckIcon, path: "/app/supply/delivery" },
+    { title: "Báo cáo", icon: BarChart3, path: "/app/manager/reports" },
   ],
   central_kitchen: [
-    {
-      title: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/app/central/dashboard",
-    },
-    {
-      title: "Đơn hàng từ cửa hàng",
-      icon: ClipboardList,
-      path: "/app/central/orders",
-    },
-    {
-      title: "Sản xuất & xuất kho",
-      icon: TruckIcon,
-      path: "/app/central/production",
-    },
-    {
-      title: "Nguyên liệu & lô sản xuất",
-      icon: Warehouse,
-      path: "/app/central/materials",
-    },
+    { title: "Dashboard", icon: LayoutDashboard, path: "/app/central/dashboard" },
+    { title: "Đơn hàng", icon: ClipboardList, path: "/app/central/orders" },
+    { title: "Kho hàng", icon: Warehouse, path: "/app/central/materials" },
   ],
   supply_coordinator: [
-    {
-      title: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/app/supply/dashboard",
-    },
-    {
-      title: "Tổng hợp đơn hàng",
-      icon: ClipboardList,
-      path: "/app/supply/orders",
-    },
-    {
-      title: "Điều phối & giao hàng",
-      icon: TruckIcon,
-      path: "/app/supply/delivery",
-    },
-    { title: "Xử lý sự cố", icon: Settings, path: "/app/supply/issues" },
+    { title: "Dashboard", icon: LayoutDashboard, path: "/app/supply/dashboard" },
+    { title: "Đơn hàng", icon: ClipboardList, path: "/app/supply/orders" },
+    { title: "Vận chuyển", icon: TruckIcon, path: "/app/supply/delivery" },
   ],
   franchise_staff: [
     { title: "Dashboard", icon: LayoutDashboard, path: "/app/store/dashboard" },
-    {
-      title: "Đơn hàng cửa hàng",
-      icon: ClipboardList,
-      path: "/app/store/orders",
-    },
-    {
-      title: "Tồn kho cửa hàng",
-      icon: Warehouse,
-      path: "/app/store/inventory",
-    },
+    { title: "Đơn hàng", icon: ClipboardList, path: "/app/store/orders" },
+    { title: "Kho hàng", icon: Warehouse, path: "/app/store/inventory" },
+    { title: "Vận chuyển", icon: TruckIcon, path: "/app/supply/delivery" },
+  ],
+  driver: [
+    { title: "Dashboard", icon: LayoutDashboard, path: "/app/driver/dashboard" },
+    { title: "Vận chuyển", icon: TruckIcon, path: "/app/driver/delivery" },
   ],
 };
 
@@ -200,6 +153,7 @@ const roleLabels = {
   central_kitchen: "NV Bếp trung tâm",
   supply_coordinator: "Điều phối viên",
   franchise_staff: "NV Cửa hàng",
+  driver: "Tài xế",
 };
 
 export default function Sidebar({

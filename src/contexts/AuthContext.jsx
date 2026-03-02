@@ -116,6 +116,7 @@ export const AuthProvider = ({ children }) => {
 
   const updateUser = updatedUser => {
     setUser(updatedUser);
+    setIsAuthenticated(!!updatedUser);
     authService.setUser(updatedUser);
   };
 
