@@ -14,6 +14,7 @@ import {
 import StatCard from "../../components/ui/StatCard";
 import StatusBadge from "../../components/ui/StatusBadges";
 import { Link } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
 
 const recentOrders = [
   {
@@ -76,7 +77,9 @@ const alerts = [
   },
 ];
 
-export default function AdminDashboard({ userRole, userName }) {
+export default function AdminDashboard() {
+  const { user } = useAuth();
+  const userName = user?.name || user?.full_name || 'Admin';
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 

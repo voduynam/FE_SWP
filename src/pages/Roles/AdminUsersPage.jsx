@@ -9,7 +9,6 @@ import {
   UserX,
   Download,
 } from "lucide-react";
-import StatusBadge from "../../components/ui/StatusBadges";
 
 const usersData = [
   {
@@ -87,17 +86,28 @@ const usersData = [
 const roleLabels = {
   admin: {
     label: "Quản trị viên",
-    color: "bg-destructive/15 text-destructive",
+    // hồng nhạt + chữ đỏ giống badge trong thiết kế
+    color: "bg-rose-50 text-rose-600",
   },
-  manager: { label: "Quản lý", color: "bg-primary/15 text-primary" },
-  central_kitchen: { label: "NV Bếp TT", color: "bg-accent/15 text-accent" },
+  manager: {
+    label: "Quản lý",
+    // xanh dương nhạt
+    color: "bg-sky-50 text-sky-600",
+  },
+  central_kitchen: {
+    label: "NV Bếp TT",
+    // xanh teal nhạt
+    color: "bg-teal-50 text-teal-600",
+  },
   supply_coordinator: {
     label: "Điều phối viên",
-    color: "bg-warning/15 text-warning",
+    // vàng nhạt
+    color: "bg-amber-50 text-amber-600",
   },
   franchise_staff: {
     label: "NV Cửa hàng",
-    color: "bg-success/15 text-success",
+    // xanh lá nhạt
+    color: "bg-emerald-50 text-emerald-600",
   },
 };
 
@@ -132,45 +142,53 @@ function UserForm({ initial, onSave, onCancel }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium">Tên</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Tên
+          </label>
           <input
             type="text"
             required
             value={form.name}
             onChange={(e) => update("name", e.target.value)}
-            className="input-field mt-1 w-full"
+            className="mt-1 w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium">Email</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Email
+          </label>
           <input
             type="email"
             required
             value={form.email}
             onChange={(e) => update("email", e.target.value)}
-            className="input-field mt-1 w-full"
+            className="mt-1 w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           />
         </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium">Điện thoại</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Điện thoại
+          </label>
           <input
             type="text"
             value={form.phone}
             onChange={(e) => update("phone", e.target.value)}
-            className="input-field mt-1 w-full"
+            className="mt-1 w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium">Vai trò</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Vai trò
+          </label>
           <select
             value={form.role}
             onChange={(e) => update("role", e.target.value)}
-            className="input-field mt-1 w-full"
+            className="mt-1 w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           >
             {roles.slice(1).map((r) => (
               <option key={r} value={r}>
@@ -182,31 +200,42 @@ function UserForm({ initial, onSave, onCancel }) {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium">Cửa hàng</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Cửa hàng
+          </label>
           <input
             type="text"
             value={form.store}
             onChange={(e) => update("store", e.target.value)}
-            className="input-field mt-1 w-full"
+            className="mt-1 w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium">Trạng thái</label>
+          <label className="block text-sm font-medium text-slate-700">
+            Trạng thái
+          </label>
           <select
             value={form.status}
             onChange={(e) => update("status", e.target.value)}
-            className="input-field mt-1 w-full"
+            className="mt-1 w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           >
             <option value="active">Hoạt động</option>
             <option value="inactive">Ngừng HĐ</option>
           </select>
         </div>
       </div>
-      <div className="flex justify-end gap-2 pt-2">
-        <button type="button" onClick={onCancel} className="btn-ghost">
+      <div className="flex justify-end gap-2 pt-4 border-t border-slate-200">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+        >
           Hủy
         </button>
-        <button type="submit" className="btn-primary">
+        <button
+          type="submit"
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-500 text-white hover:bg-orange-600 shadow-sm transition-colors"
+        >
           Lưu
         </button>
       </div>
@@ -220,7 +249,7 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState("Tất cả");
   const [statusFilter, setStatusFilter] = useState("all");
   const [modalVisible, setModalVisible] = useState(false);
-  const [modalUser, setModalUser] = useState(null); // null means adding
+  const [modalUser, setModalUser] = useState(null); // null: thêm mới
 
   function openModal(user = null) {
     setModalUser(user);
@@ -257,11 +286,6 @@ export default function AdminUsersPage() {
       }),
     [users, searchTerm, roleFilter, statusFilter],
   );
-
-  function handleAddUser() {
-    // placeholder: mở modal hoặc chuyển trang thêm user
-    alert("Chức năng Thêm người dùng sẽ được mở (chưa triển khai).");
-  }
 
   function handleEditUser(user) {
     openModal(user);
@@ -307,21 +331,23 @@ export default function AdminUsersPage() {
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Quản lý Người dùng</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-3xl font-bold text-slate-900">
+            Quản lý Người dùng
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
             Quản lý tài khoản và phân quyền theo vai trò
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => openModal()}
-            className="btn-secondary flex items-center gap-2 w-fit"
+            className="inline-flex items-center gap-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 text-sm font-medium shadow-sm transition-colors"
           >
             <Plus className="w-4 h-4" /> Thêm người dùng
           </button>
           <button
             onClick={exportUsersCsv}
-            className="btn-outline flex items-center gap-2"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
           >
             <Download className="w-4 h-4" /> Xuất
           </button>
@@ -330,11 +356,29 @@ export default function AdminUsersPage() {
 
       {/* Add / Edit Modal */}
       {modalVisible && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-xl p-6 w-full max-w-lg">
-            <h2 className="text-xl font-semibold mb-4">
-              {modalUser ? "Chỉnh sửa người dùng" : "Thêm người dùng"}
-            </h2>
+        <div
+          className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 px-4"
+          onClick={closeModal}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-xl font-semibold text-slate-900">
+                {modalUser ? "Chỉnh sửa người dùng" : "Thêm người dùng"}
+              </h2>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none px-2"
+                aria-label="Đóng"
+              >
+                ×
+              </button>
+            </div>
             <UserForm
               initial={modalUser}
               onCancel={closeModal}
@@ -352,10 +396,16 @@ export default function AdminUsersPage() {
             <button
               key={role}
               onClick={() => setRoleFilter(role)}
-              className={`p-4 rounded-xl border transition-all ${roleFilter === role ? "border-secondary bg-secondary/10" : "border-border bg-card hover:border-secondary/50"}`}
+              className={`p-4 rounded-xl border transition-all text-left ${
+                roleFilter === role
+                  ? "border-orange-400 bg-orange-50 shadow-sm"
+                  : "border-slate-200 bg-white hover:border-orange-200"
+              }`}
             >
-              <p className="text-2xl font-bold">{count}</p>
-              <p className="text-sm text-muted-foreground">{config.label}</p>
+              <p className="text-2xl font-semibold text-slate-900">{count}</p>
+              <p className="text-xs mt-1 text-slate-500 uppercase tracking-wide">
+                {config.label}
+              </p>
             </button>
           );
         })}
@@ -364,20 +414,20 @@ export default function AdminUsersPage() {
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
             type="text"
             placeholder="Tìm kiếm theo tên, email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-field pl-11"
+            className="w-full h-11 rounded-lg border border-slate-200 bg-white pl-11 pr-4 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400 transition"
           />
         </div>
         <div className="flex gap-3">
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
-            className="input-field min-w-[160px]"
+            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 min-w-[160px] focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           >
             {roles.map((role) => (
               <option key={role} value={role}>
@@ -388,7 +438,7 @@ export default function AdminUsersPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="input-field min-w-[140px]"
+            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 min-w-[140px] focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
           >
             <option value="all">Tất cả TT</option>
             <option value="active">Hoạt động</option>
@@ -398,38 +448,38 @@ export default function AdminUsersPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-card rounded-xl border border-border overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
         <table className="w-full">
-          <thead className="table-header">
+          <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
             <tr>
-              <th className="px-6 py-4 text-left">Người dùng</th>
-              <th className="px-6 py-4 text-left">Liên hệ</th>
-              <th className="px-6 py-4 text-left">Vai trò</th>
-              <th className="px-6 py-4 text-left">Cửa hàng</th>
-              <th className="px-6 py-4 text-center">Trạng thái</th>
-              <th className="px-6 py-4 text-left">Đăng nhập cuối</th>
-              <th className="px-6 py-4 text-center">Thao tác</th>
+              <th className="px-6 py-3 text-left">Người dùng</th>
+              <th className="px-6 py-3 text-left">Liên hệ</th>
+              <th className="px-6 py-3 text-left">Vai trò</th>
+              <th className="px-6 py-3 text-left">Cửa hàng</th>
+              <th className="px-6 py-3 text-center">Trạng thái</th>
+              <th className="px-6 py-3 text-left">Đăng nhập cuối</th>
+              <th className="px-6 py-3 text-center">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {filteredUsers.map((user) => (
-              <tr key={user.id} className="hover:bg-muted/50">
+              <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <span className="text-sm font-semibold text-primary">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+                      <span className="text-sm font-semibold text-slate-700">
                         {user.name.split(" ").slice(-1)[0].charAt(0)}
                       </span>
                     </div>
                     <div>
-                      <p className="font-medium">{user.name}</p>
-                      <p className="text-xs text-muted-foreground">{user.id}</p>
+                      <p className="font-medium text-slate-900">{user.name}</p>
+                      <p className="text-xs text-slate-400">{user.id}</p>
                     </div>
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <p className="text-sm">{user.email}</p>
-                  <p className="text-xs text-muted-foreground">{user.phone}</p>
+                  <p className="text-sm text-slate-800">{user.email}</p>
+                  <p className="text-xs text-slate-400">{user.phone}</p>
                 </td>
                 <td className="px-6 py-4">
                   <span
@@ -442,18 +492,18 @@ export default function AdminUsersPage() {
                 <td className="px-6 py-4 text-sm">{user.store}</td>
                 <td className="px-6 py-4 text-center">
                   {user.status === "active" ? (
-                    <span className="inline-flex items-center gap-1 text-success text-sm">
+                    <span className="inline-flex items-center gap-1 text-emerald-600 text-sm">
                       <UserCheck className="w-4 h-4" />
                       Hoạt động
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-muted-foreground text-sm">
+                    <span className="inline-flex items-center gap-1 text-slate-400 text-sm">
                       <UserX className="w-4 h-4" />
                       Ngừng HĐ
                     </span>
                   )}
                 </td>
-                <td className="px-6 py-4 text-sm text-muted-foreground">
+                <td className="px-6 py-4 text-sm text-slate-500">
                   {user.lastLogin}
                 </td>
                 <td className="px-6 py-4">
@@ -479,14 +529,14 @@ export default function AdminUsersPage() {
           </tbody>
         </table>
         {filteredUsers.length === 0 && (
-          <div className="py-12 text-center text-muted-foreground">
+          <div className="py-10 text-center text-slate-400 text-sm">
             Không tìm thấy người dùng phù hợp
           </div>
         )}
       </div>
 
       {/* Summary */}
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <div className="flex items-center justify-between text-xs text-slate-400">
         <p>
           Hiển thị {filteredUsers.length} / {users.length} người dùng
         </p>
