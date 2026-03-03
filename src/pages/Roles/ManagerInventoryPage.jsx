@@ -1,11 +1,60 @@
+import { useEffect, useState } from 'react';
+import { workflowService } from '../../services/workflowService';
+
 export default function ManagerInventoryPage() {
+  const [summary, setSummary] = useState(null);
+  const [balances, setBalances] = useState([]);
+
+  const loadData = async () => {
+    const [summaryRes, balanceRes] = await Promise.all([
+      workflowService.getInventorySummary({}),
+      workflowService.getInventoryBalances({ limit: 20 }),
+    ]);
+
+    const balanceRows = Array.isArray(balanceRes.data?.data)
+      ? balanceRes.data.data
+      : Array.isArray(balanceRes.data)
+        ? balanceRes.data
+        : [];
+
+    setSummary(summaryRes.success ? summaryRes.data : null);
+    setBalances(balanceRows);
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
   return (
     <div className='space-y-4'>
-      <h1 className='text-2xl font-bold'>Tồn kho hệ thống</h1>
-      <p className='text-gray-600'>
-        Trang dành cho Quản lý vận hành để theo dõi tồn kho tại bếp trung tâm và các cửa hàng
-        franchise.
-      </p>
+      <div className='flex items-center justify-between'>
+        <div>
+          <h1 className='text-2xl font-bold'>Tồn kho hệ thống</h1>
+          <p className='text-gray-600'>
+            Flow áp dụng: `inventory/summary` + `inventory/balances` cho Manager.
+          </p>
+        </div>
+        <button onClick={loadData} className='rounded-md bg-black px-3 py-2 text-sm text-white'>
+          Làm mới
+        </button>
+      </div>
+
+      <div className='rounded-lg border bg-white px-4 py-3 text-sm'>
+        <div className='font-semibold'>Tổng quan tồn kho</div>
+        <div className='mt-1 text-gray-600'>Tổng giá trị: {summary?.total_value ?? '-'}</div>
+      </div>
+
+      <div className='rounded-lg border bg-white divide-y'>
+        {!balances.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có dữ liệu</p>}
+        {balances.map((row, idx) => (
+          <div key={row._id || idx} className='px-4 py-3 text-sm'>
+            <div className='font-medium'>{row.item_name || row.item_id || 'Item'}</div>
+            <div className='text-gray-500'>
+              On hand: {row.qty_on_hand ?? 0} | Available: {row.qty_available ?? 0}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
