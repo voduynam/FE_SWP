@@ -1,6 +1,40 @@
 import { useEffect, useState } from 'react';
 import { workflowService } from '../../services/workflowService';
 
+const getBalanceRows = res => {
+  if (!res?.success) return [];
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.data?.data)) return res.data.data;
+  return [];
+};
+
+const getLowStockAlerts = res => {
+  if (!res?.success) return [];
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.data?.alerts)) return res.data.alerts;
+  if (Array.isArray(res.data?.data?.alerts)) return res.data.data.alerts;
+  return [];
+};
+
+const getItemDisplayName = row => {
+  if (!row) return 'Item';
+  if (row.item_name) return row.item_name;
+  if (row.item_id && typeof row.item_id === 'object') {
+    return row.item_id.name || row.item_id.sku || row.item_id._id || 'Item';
+  }
+  return row.item_id || 'Item';
+};
+
+const getAlertItemName = row => {
+  if (!row) return 'Item';
+  if (row.item?.name) return row.item.name;
+  if (row.item_name) return row.item_name;
+  if (row.item_id && typeof row.item_id === 'object') {
+    return row.item_id.name || row.item_id.sku || row.item_id._id || 'Item';
+  }
+  return row.item_id || 'Item';
+};
+
 export default function FranchiseInventoryPage() {
   const [balances, setBalances] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -17,19 +51,8 @@ export default function FranchiseInventoryPage() {
       setError('Không tải đủ dữ liệu tồn kho/cảnh báo');
     }
 
-    const balanceRows = Array.isArray(balanceRes.data?.data)
-      ? balanceRes.data.data
-      : Array.isArray(balanceRes.data)
-        ? balanceRes.data
-        : [];
-    const alertRows = Array.isArray(alertRes.data?.data)
-      ? alertRes.data.data
-      : Array.isArray(alertRes.data)
-        ? alertRes.data
-        : [];
-
-    setBalances(balanceRows);
-    setAlerts(alertRows);
+    setBalances(getBalanceRows(balanceRes));
+    setAlerts(getLowStockAlerts(alertRes));
   };
 
   useEffect(() => {
@@ -59,8 +82,10 @@ export default function FranchiseInventoryPage() {
             {!balances.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có dữ liệu</p>}
             {balances.map((row, idx) => (
               <div key={row._id || idx} className='px-4 py-3 text-sm'>
-                <div className='font-medium'>{row.item_name || row.item_id || 'Item'}</div>
-                <div className='text-gray-500'>Sẵn dùng: {row.qty_available ?? row.qty_on_hand ?? 0}</div>
+                <div className='font-medium'>{getItemDisplayName(row)}</div>
+                <div className='text-gray-500'>
+                  Sẵn dùng: {row.qty_available ?? ((row.qty_on_hand ?? 0) - (row.qty_reserved ?? 0))}
+                </div>
               </div>
             ))}
           </div>
@@ -72,9 +97,9 @@ export default function FranchiseInventoryPage() {
             {!alerts.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có cảnh báo</p>}
             {alerts.map((row, idx) => (
               <div key={row._id || idx} className='px-4 py-3 text-sm'>
-                <div className='font-medium'>{row.item?.name || row.item_name || row.item_id}</div>
+                <div className='font-medium'>{getAlertItemName(row)}</div>
                 <div className='text-gray-500'>
-                  Tồn khả dụng: {row.qty_available ?? '-'} | Min: {row.min_stock_level ?? '-'}
+                  Tồn khả dụng: {row.qty_available ?? '-'} | Min: {row.min_stock ?? '-'}
                 </div>
               </div>
             ))}

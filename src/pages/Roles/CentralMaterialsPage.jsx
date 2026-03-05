@@ -1,28 +1,41 @@
 import { useEffect, useState } from 'react';
 import { workflowService } from '../../services/workflowService';
 
+const getExpiryAlerts = res => {
+  if (!res?.success) return [];
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.data?.alerts)) return res.data.alerts;
+  if (Array.isArray(res.data?.data?.alerts)) return res.data.data.alerts;
+  return [];
+};
+
+const getItemDisplayName = row => {
+  if (!row) return 'Item';
+  if (row.item?.name) return row.item.name;
+  if (row.item_name) return row.item_name;
+  if (row.item_id && typeof row.item_id === 'object') {
+    return row.item_id.name || row.item_id.sku || row.item_id._id || 'Item';
+  }
+  return row.item_id || 'Item';
+};
+
 export default function CentralMaterialsPage() {
   const [expiring, setExpiring] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState([]);
+  const [error, setError] = useState('');
 
   const loadData = async () => {
-    const [inventoryRes, alertRes] = await Promise.all([
-      workflowService.getInventoryExpiring({ days: 7 }),
-      workflowService.getAlertsExpiry({}),
-    ]);
+    setError('');
+    const alertRes = await workflowService.getAlertsExpiry({ days_threshold: 7 });
+    if (!alertRes.success) {
+      setError('Không tải được dữ liệu cảnh báo hết hạn');
+      setExpiring([]);
+      setExpiryAlerts([]);
+      return;
+    }
 
-    const inventoryRows = Array.isArray(inventoryRes.data?.data)
-      ? inventoryRes.data.data
-      : Array.isArray(inventoryRes.data)
-        ? inventoryRes.data
-        : [];
-    const alertRows = Array.isArray(alertRes.data?.data)
-      ? alertRes.data.data
-      : Array.isArray(alertRes.data)
-        ? alertRes.data
-        : [];
-
-    setExpiring(inventoryRows);
+    const alertRows = getExpiryAlerts(alertRes);
+    setExpiring(alertRows);
     setExpiryAlerts(alertRows);
   };
 
@@ -42,15 +55,19 @@ export default function CentralMaterialsPage() {
         </button>
       </div>
 
+      {error && <p className='text-sm text-red-600'>{error}</p>}
+
       <div className='grid gap-4 md:grid-cols-2'>
         <div className='rounded-lg border bg-white'>
-          <div className='border-b px-4 py-3 text-sm font-semibold'>Inventory expiring</div>
+          <div className='border-b px-4 py-3 text-sm font-semibold'>Lô sắp hết hạn (7 ngày)</div>
           <div className='divide-y'>
             {!expiring.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có dữ liệu</p>}
             {expiring.map((row, idx) => (
               <div key={row._id || idx} className='px-4 py-3 text-sm'>
-                <div className='font-medium'>{row.item_name || row.item_id || 'Item'}</div>
-                <div className='text-gray-500'>Hết hạn: {row.exp_date || '-'}</div>
+                <div className='font-medium'>{getItemDisplayName(row)}</div>
+                <div className='text-gray-500'>
+                  Lô: {row.lot?.lot_code || '-'} | SL: {row.qty_on_hand ?? 0} | Hết hạn: {row.exp_date || '-'}
+                </div>
               </div>
             ))}
           </div>
@@ -63,8 +80,10 @@ export default function CentralMaterialsPage() {
             )}
             {expiryAlerts.map((row, idx) => (
               <div key={row._id || idx} className='px-4 py-3 text-sm'>
-                <div className='font-medium'>{row.item?.name || row.item_name || row.item_id}</div>
-                <div className='text-gray-500'>Mức độ: {row.severity || '-'}</div>
+                <div className='font-medium'>{getItemDisplayName(row)}</div>
+                <div className='text-gray-500'>
+                  Mức độ: {row.severity || '-'} | Còn: {row.days_until_expiry ?? '-'} ngày
+                </div>
               </div>
             ))}
           </div>

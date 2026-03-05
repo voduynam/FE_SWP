@@ -3,12 +3,13 @@ import { workflowService } from '../../services/workflowService';
 
 export default function SupplyIssuesPage() {
   const [severity, setSeverity] = useState('');
+  const [status, setStatus] = useState('');
   const [issues, setIssues] = useState([]);
 
-  const loadIssues = async nextSeverity => {
+  const loadIssues = async (nextSeverity, nextStatus) => {
     const result = await workflowService.getExceptions({
       severity: nextSeverity || undefined,
-      status: 'OPEN',
+      status: nextStatus || undefined,
       limit: 20,
     });
     const rows = Array.isArray(result.data?.data)
@@ -20,8 +21,8 @@ export default function SupplyIssuesPage() {
   };
 
   useEffect(() => {
-    loadIssues(severity);
-  }, [severity]);
+    loadIssues(severity, status);
+  }, [severity, status]);
 
   return (
     <div className='space-y-4'>
@@ -34,6 +35,17 @@ export default function SupplyIssuesPage() {
         </div>
         <div className='flex gap-2'>
           <select
+            value={status}
+            onChange={e => setStatus(e.target.value)}
+            className='rounded-md border px-3 py-2 text-sm'
+          >
+            <option value=''>Tất cả trạng thái</option>
+            <option value='OPEN'>OPEN</option>
+            <option value='IN_PROGRESS'>IN_PROGRESS</option>
+            <option value='RESOLVED'>RESOLVED</option>
+            <option value='CLOSED'>CLOSED</option>
+          </select>
+          <select
             value={severity}
             onChange={e => setSeverity(e.target.value)}
             className='rounded-md border px-3 py-2 text-sm'
@@ -45,7 +57,7 @@ export default function SupplyIssuesPage() {
             <option value='CRITICAL'>CRITICAL</option>
           </select>
           <button
-            onClick={() => loadIssues(severity)}
+            onClick={() => loadIssues(severity, status)}
             className='rounded-md bg-black px-3 py-2 text-sm text-white'
           >
             Làm mới
@@ -54,7 +66,7 @@ export default function SupplyIssuesPage() {
       </div>
 
       <div className='rounded-lg border bg-white divide-y'>
-        {!issues.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có sự cố mở</p>}
+        {!issues.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có dữ liệu sự cố</p>}
         {issues.map(issue => (
           <div key={issue._id || issue.id} className='px-4 py-3 text-sm'>
             <div className='font-medium'>

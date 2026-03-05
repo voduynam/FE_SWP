@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import { workflowService } from '../../services/workflowService';
 
+const getLocationName = location => {
+  if (!location) return '-';
+  if (typeof location === 'string') return location;
+  return location.name || location.code || location._id || '-';
+};
+
 export default function SupplyDeliveryPage() {
   const [routes, setRoutes] = useState([]);
   const [shipments, setShipments] = useState([]);
@@ -8,7 +14,7 @@ export default function SupplyDeliveryPage() {
   const loadData = async () => {
     const [routeRes, shipmentRes] = await Promise.all([
       workflowService.getDeliveryRoutes({ limit: 20 }),
-      workflowService.getShipments({ status: 'PENDING', limit: 20 }),
+      workflowService.getShipments({ limit: 20 }),
     ]);
 
     const routeRows = Array.isArray(routeRes.data?.data)
@@ -60,16 +66,17 @@ export default function SupplyDeliveryPage() {
           </div>
         </div>
         <div className='rounded-lg border bg-white'>
-          <div className='border-b px-4 py-3 text-sm font-semibold'>Shipments PENDING</div>
+          <div className='border-b px-4 py-3 text-sm font-semibold'>Shipments</div>
           <div className='divide-y'>
             {!shipments.length && (
-              <p className='px-4 py-6 text-sm text-gray-500'>Không có shipment chờ</p>
+              <p className='px-4 py-6 text-sm text-gray-500'>Không có shipment</p>
             )}
             {shipments.map(row => (
               <div key={row._id || row.id} className='px-4 py-3 text-sm'>
                 <div className='font-medium'>{row.shipment_no || row._id}</div>
                 <div className='text-gray-500'>
-                  Từ: {row.from_location_id || '-'} -&gt; Đến: {row.to_location_id || '-'}
+                  Từ: {getLocationName(row.from_location_id)} -&gt; Đến:{' '}
+                  {getLocationName(row.to_location_id)}
                 </div>
               </div>
             ))}

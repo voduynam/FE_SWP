@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react';
 import { workflowService } from '../../services/workflowService';
 
-const tomorrow = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+const today = () => new Date().toISOString().slice(0, 10);
+
+const getItemName = row => {
+  if (!row) return 'Item';
+  if (row.item_name) return row.item_name;
+  if (row.item_id && typeof row.item_id === 'object') {
+    return row.item_id.name || row.item_id.sku || row.item_id._id || 'Item';
+  }
+  return row.item_id || 'Item';
 };
 
 export default function SupplyOrdersPage() {
-  const [deliveryDate, setDeliveryDate] = useState(tomorrow());
+  const [deliveryDate, setDeliveryDate] = useState(today());
   const [rows, setRows] = useState([]);
   const [message, setMessage] = useState('');
 
@@ -32,7 +37,7 @@ export default function SupplyOrdersPage() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [deliveryDate]);
 
   return (
     <div className='space-y-4'>
@@ -67,9 +72,9 @@ export default function SupplyOrdersPage() {
         {!rows.length && <p className='px-4 py-6 text-sm text-gray-500'>Không có dữ liệu</p>}
         {rows.map((row, idx) => (
           <div key={row._id || idx} className='px-4 py-3 text-sm'>
-            <div className='font-medium'>{row.item_name || row.item_id || row._id}</div>
+            <div className='font-medium'>{getItemName(row)}</div>
             <div className='text-gray-500'>
-              Nhu cầu: {row.total_qty || row.qty || '-'} | Trạng thái SX:{' '}
+              Nhu cầu: {row.total_qty_ordered ?? row.total_qty ?? row.qty ?? '-'} | Trạng thái SX:{' '}
               {row.production_status || '-'}
             </div>
           </div>
