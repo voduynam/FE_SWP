@@ -84,6 +84,10 @@ export const workflowService = {
     withResult(() => axiosInstance.get('/master-data/org-units', { params })),
   getCategories: params =>
     withResult(() => axiosInstance.get('/master-data/categories', { params })),
+  getRoles: params =>
+    withResult(() => axiosInstance.get('/master-data/roles', { params })),
+  registerUser: payload =>
+    withResult(() => axiosInstance.post('/auth/register', payload)),
 };
 
 export default workflowService;
