@@ -3,8 +3,17 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { useAuth } from "../../contexts/AuthContext";
 
+const normalizeRoleCode = (code) => {
+  const upper = (code || "").toUpperCase();
+  if (upper === "CHEF") return "CENTRAL_KITCHEN_STAFF";
+  if (upper === "STORE_STAFF") return "FRANCHISE_STORE_STAFF";
+  return upper;
+};
+
 const mapRoleCodesToSidebarRole = (roles) => {
-  const codes = Array.isArray(roles) ? roles.map((r) => r.code) : [];
+  const codes = Array.isArray(roles)
+    ? roles.map((r) => normalizeRoleCode(r.code))
+    : [];
 
   if (codes.includes("ADMIN")) return "admin";
   if (codes.includes("MANAGER")) return "manager";
