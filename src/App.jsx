@@ -37,6 +37,7 @@ import GoodsReceiptPage from './pages/Roles/GoodsReceiptPage';
 import CentralOrdersPage from './pages/Roles/CentralOrdersPage';
 import CentralProductionPage from './pages/Roles/CentralProductionPage';
 import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
+import CentralShipmentsPage from './pages/Roles/CentralShipmentsPage';
 // Supply coordinator pages
 import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
 import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
@@ -100,6 +101,7 @@ function AppContent() {
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='orders' element={<CentralOrdersPage />} />
           <Route path='production' element={<CentralProductionPage />} />
+          <Route path='shipments' element={<CentralShipmentsPage />} />
           <Route path='materials' element={<CentralMaterialsPage />} />
         </Route>
 

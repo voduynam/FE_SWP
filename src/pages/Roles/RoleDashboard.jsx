@@ -6,9 +6,22 @@ import CentralKitchenDashboard from './CentralKitchenDashboard';
 import FranchiseStoreDashboard from './FranchiseStoreDashboard';
 import DriverDashboard from '../Dashboards/DriverDashboard';
 
+const normalizeRoleCode = role => {
+  const normalized = String(role || '').trim().toUpperCase().replace(/-/g, '_');
+  const aliasMap = {
+    CHEF: 'CENTRAL_KITCHEN_STAFF',
+    CENTRAL_KITCHEN: 'CENTRAL_KITCHEN_STAFF',
+    STORE_STAFF: 'FRANCHISE_STORE_STAFF',
+    FRANCHISE_STAFF: 'FRANCHISE_STORE_STAFF',
+  };
+  return aliasMap[normalized] || normalized;
+};
+
 const RoleDashboard = () => {
   const { user } = useAuth();
-  const codes = Array.isArray(user?.roles) ? user.roles.map(r => r.code) : [];
+  const codes = Array.isArray(user?.roles)
+    ? user.roles.map(r => normalizeRoleCode(r.code))
+    : [];
 
   if (codes.includes('ADMIN')) {
     return <AdminDashboard />;

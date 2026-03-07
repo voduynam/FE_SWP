@@ -182,9 +182,14 @@ const menuByRole = {
       path: "/app/central/orders",
     },
     {
-      title: "Sản xuất & xuất kho",
-      icon: TruckIcon,
+      title: "Sản xuất",
+      icon: ChefHat,
       path: "/app/central/production",
+    },
+    {
+      title: "Giao hàng",
+      icon: TruckIcon,
+      path: "/app/central/shipments",
     },
     {
       title: "Nguyên liệu & lô sản xuất",

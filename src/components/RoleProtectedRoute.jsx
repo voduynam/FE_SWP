@@ -2,11 +2,21 @@ import { useContext } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContext';
 
-const normalizeRoleCode = code => {
-  const upper = (code || '').toUpperCase();
-  if (upper === 'CHEF') return 'CENTRAL_KITCHEN_STAFF';
-  if (upper === 'STORE_STAFF') return 'FRANCHISE_STORE_STAFF';
-  return upper;
+const normalizeRoleCode = role => {
+  const normalized = String(role || '').trim().toUpperCase().replace(/-/g, '_');
+  const aliasMap = {
+    ADMIN: 'ADMIN',
+    MANAGER: 'MANAGER',
+    SUPPLY_COORDINATOR: 'SUPPLY_COORDINATOR',
+    CENTRAL_KITCHEN_STAFF: 'CENTRAL_KITCHEN_STAFF',
+    CENTRAL_KITCHEN: 'CENTRAL_KITCHEN_STAFF',
+    CHEF: 'CENTRAL_KITCHEN_STAFF',
+    STORE_STAFF: 'FRANCHISE_STORE_STAFF',
+    FRANCHISE_STAFF: 'FRANCHISE_STORE_STAFF',
+    FRANCHISE_STORE_STAFF: 'FRANCHISE_STORE_STAFF',
+    DRIVER: 'DRIVER',
+  };
+  return aliasMap[normalized] || normalized;
 };
 
 const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
@@ -31,18 +41,16 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
 
   // Check if user has required role
   if (allowedRoles.length > 0 && user) {
-    const rawCodes = Array.isArray(user.roles)
-      ? user.roles.map(r => r.code)
+    const roleCodes = Array.isArray(user.roles)
+      ? user.roles.map(r => normalizeRoleCode(r.code))
       : [];
 
-    const normalizedCodes = rawCodes.map(normalizeRoleCode);
-
-    const legacyRoleName = user.roleId?.roleName;
+    const legacyRoleName = normalizeRoleCode(user.roleId?.roleName);
+    const normalizedAllowedRoles = allowedRoles.map(normalizeRoleCode);
 
     const hasPermission =
-      normalizedCodes.some(code => allowedRoles.includes(code)) ||
-      (legacyRoleName && allowedRoles.includes(legacyRoleName));
-
+      roleCodes.some(code => normalizedAllowedRoles.includes(code)) ||
+      (legacyRoleName && normalizedAllowedRoles.includes(legacyRoleName));
     if (!hasPermission) {
       // Redirect to unauthorized page
       return (

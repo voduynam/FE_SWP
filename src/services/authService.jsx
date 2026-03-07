@@ -84,20 +84,45 @@ export const authService = {
       // Chuẩn hóa cấu trúc roles từ backend để FE dùng thống nhất
       let normalizedUser = user;
       if (user && Array.isArray(user.roles)) {
+        const normalizeRoleCode = (inputCode = '', rawName = '') => {
+          const normalized = String(inputCode || '').trim().toUpperCase();
+          const aliasMap = {
+            ADMIN: 'ADMIN',
+            MANAGER: 'MANAGER',
+            SUPPLY_COORDINATOR: 'SUPPLY_COORDINATOR',
+            SUPPLYCOORDINATOR: 'SUPPLY_COORDINATOR',
+            CENTRAL_KITCHEN_STAFF: 'CENTRAL_KITCHEN_STAFF',
+            CENTRAL_KITCHEN: 'CENTRAL_KITCHEN_STAFF',
+            CHEF: 'CENTRAL_KITCHEN_STAFF',
+            KITCHEN_STAFF: 'CENTRAL_KITCHEN_STAFF',
+            FRANCHISE_STORE_STAFF: 'FRANCHISE_STORE_STAFF',
+            FRANCHISE_STAFF: 'FRANCHISE_STORE_STAFF',
+            STORE_STAFF: 'FRANCHISE_STORE_STAFF',
+            DRIVER: 'DRIVER',
+          };
+
+          if (normalized && aliasMap[normalized]) {
+            return aliasMap[normalized];
+          }
+
+          const upperName = String(rawName || '').toUpperCase();
+          if (upperName.includes('ADMIN')) return 'ADMIN';
+          if (upperName.includes('MANAGER')) return 'MANAGER';
+          if (upperName.includes('SUPPLY')) return 'SUPPLY_COORDINATOR';
+          if (upperName.includes('CENTRAL') || upperName.includes('CHEF')) {
+            return 'CENTRAL_KITCHEN_STAFF';
+          }
+          if (upperName.includes('FRANCHISE') || upperName.includes('STORE')) {
+            return 'FRANCHISE_STORE_STAFF';
+          }
+          if (upperName.includes('DRIVER')) return 'DRIVER';
+
+          return normalized || upperName.replace(/\s+/g, '_');
+        };
+
         const normalizedRoles = user.roles.map(role => {
           const rawName = role.role_name || role.name || '';
-          let code = role.code;
-
-          if (!code && rawName) {
-            const upper = rawName.toUpperCase();
-            if (upper.includes('ADMIN')) code = 'ADMIN';
-            else if (upper.includes('MANAGER')) code = 'MANAGER';
-            else if (upper.includes('SUPPLY')) code = 'SUPPLY_COORDINATOR';
-            else if (upper.includes('CENTRAL')) code = 'CENTRAL_KITCHEN_STAFF';
-            else if (upper.includes('FRANCHISE') || upper.includes('STORE'))
-              code = 'FRANCHISE_STORE_STAFF';
-            else code = upper.replace(/\s+/g, '_');
-          }
+          const code = normalizeRoleCode(role.code, rawName);
 
           return {
             ...role,

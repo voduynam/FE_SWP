@@ -114,8 +114,27 @@ export const workflowService = {
   // Shipments & logistics
   getShipments: params =>
     withResult(() => axiosInstance.get('/shipments', { params })),
+  getShipmentsPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/shipments', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+    }
+  },
   getShipment: id =>
     withResult(() => axiosInstance.get(`/shipments/${id}`)),
+  getShipmentsByOrder: orderId =>
+    withResult(() => axiosInstance.get(`/shipments/by-order/${orderId}`)),
+  createShipment: payload =>
+    withResult(() => axiosInstance.post('/shipments', payload)),
+  updateShipment: (id, payload) =>
+    withResult(() => axiosInstance.put(`/shipments/${id}`, payload)),
+  updateShipmentStatus: (id, status) =>
+    withResult(() => axiosInstance.put(`/shipments/${id}/status`, { status })),
+  dispatchShipment: id =>
+    withResult(() => axiosInstance.put(`/shipments/${id}/dispatch`)),
   getGoodsReceipts: params =>
     withResult(() => axiosInstance.get('/goods-receipts', { params })),
   /** Returns full BE response: { success, data: { data: [], pagination: { page, limit, total, pages } } } */
@@ -183,6 +202,8 @@ export const workflowService = {
     withResult(() => axiosInstance.get('/master-data/org-units', { params })),
   getCategories: params =>
     withResult(() => axiosInstance.get('/master-data/categories', { params })),
+  getLocations: params =>
+    withResult(() => axiosInstance.get('/master-data/locations', { params })),
   getRoles: params =>
     withResult(() => axiosInstance.get('/master-data/roles', { params })),
   registerUser: payload =>
