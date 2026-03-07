@@ -188,15 +188,52 @@ export const workflowService = {
   processReturnRequest: id =>
     withResult(() => axiosInstance.put(`/return-requests/${id}/process`)),
 
-  // Supply coordination
+  // Supply coordination – Flow 7
   getConsolidatedOrders: params =>
     withResult(() => axiosInstance.get('/consolidated-orders', { params })),
+  getConsolidatedOrder: id =>
+    withResult(() => axiosInstance.get(`/consolidated-orders/${id}`)),
+  getConsolidatedByDate: date =>
+    withResult(() => axiosInstance.get(`/consolidated-orders/by-date/${date}`)),
   generateConsolidatedOrders: payload =>
     withResult(() => axiosInstance.post('/consolidated-orders/generate', payload)),
+
+  getDeliveryRoute: id =>
+    withResult(() => axiosInstance.get(`/delivery-routes/${id}`)),
+  createDeliveryRoute: payload =>
+    withResult(() => axiosInstance.post('/delivery-routes', payload)),
+  updateDeliveryRoute: (id, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${id}`, payload)),
+  startDeliveryRoute: (id, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${id}/start`, payload)),
+  completeDeliveryRoute: (id, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${id}/complete`, payload)),
+  updateRouteStatus: (id, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${id}/status`, payload)),
+  addRouteStop: (routeId, payload) =>
+    withResult(() => axiosInstance.post(`/delivery-routes/${routeId}/stops`, payload)),
+  updateRouteStop: (routeId, stopId, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${routeId}/stops/${stopId}`, payload)),
+  updateStopStatus: (routeId, stopId, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${routeId}/stops/${stopId}/status`, payload)),
+
+  getException: id =>
+    withResult(() => axiosInstance.get(`/exceptions/${id}`)),
   getExceptions: params =>
     withResult(() => axiosInstance.get('/exceptions', { params })),
+  createException: payload =>
+    withResult(() => axiosInstance.post('/exceptions', payload)),
   resolveException: (id, payload) =>
     withResult(() => axiosInstance.put(`/exceptions/${id}/resolve`, payload)),
+
+  getDeliveryPerformance: params =>
+    withResult(() => axiosInstance.get('/performance-metrics/delivery-performance', { params })),
+  getOrderFulfillment: params =>
+    withResult(() => axiosInstance.get('/performance-metrics/order-fulfillment', { params })),
+  getExceptionHandling: params =>
+    withResult(() => axiosInstance.get('/performance-metrics/exception-handling', { params })),
+  getProductionEfficiency: params =>
+    withResult(() => axiosInstance.get('/performance-metrics/production-efficiency', { params })),
 
   // Inventory + alerts
   getInventoryBalances: params =>
