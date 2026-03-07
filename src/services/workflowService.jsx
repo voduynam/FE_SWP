@@ -59,11 +59,57 @@ export const workflowService = {
       axiosInstance.post(`/internal-orders/${orderId}/lines`, line)
     ),
 
-  // Production
+  // Production – Flow 2: Sản xuất
   getProductionOrders: params =>
     withResult(() => axiosInstance.get('/production-orders', { params })),
+  getProductionOrdersPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/production-orders', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
+    }
+  },
+  getProductionOrder: id =>
+    withResult(() => axiosInstance.get(`/production-orders/${id}`)),
+  createProductionOrder: payload =>
+    withResult(() => axiosInstance.post('/production-orders', payload)),
   updateProductionOrderStatus: (id, payload) =>
     withResult(() => axiosInstance.put(`/production-orders/${id}/status`, payload)),
+  recordProductionConsumption: (orderId, payload) =>
+    withResult(() => axiosInstance.post(`/production-orders/${orderId}/consumption`, payload)),
+  recordProductionOutput: (orderId, payload) =>
+    withResult(() => axiosInstance.post(`/production-orders/${orderId}/output`, payload)),
+
+  // Công thức sản xuất (Recipe) – Manager, Admin
+  getRecipes: params => withResult(() => axiosInstance.get('/recipes', { params })),
+  /** Trả về full BE: { success, data: { data, pagination } } */
+  getRecipesPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/recipes', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+    }
+  },
+  getRecipe: id => withResult(() => axiosInstance.get(`/recipes/${id}`)),
+  createRecipe: payload => withResult(() => axiosInstance.post('/recipes', payload)),
+  updateRecipe: (id, payload) => withResult(() => axiosInstance.put(`/recipes/${id}`, payload)),
+  updateRecipeStatus: id => withResult(() => axiosInstance.put(`/recipes/${id}/status`)),
+  addRecipeLine: (recipeId, line) =>
+    withResult(() => axiosInstance.post(`/recipes/${recipeId}/lines`, line)),
+  deleteRecipeLine: (recipeId, lineId) =>
+    withResult(() => axiosInstance.delete(`/recipes/${recipeId}/lines/${lineId}`)),
+
+  getLots: params =>
+    withResult(() => axiosInstance.get('/lots', { params })),
 
   // Shipments & logistics
   getShipments: params =>
@@ -126,7 +172,6 @@ export const workflowService = {
 
   // Master/product/reporting
   getItems: params => withResult(() => axiosInstance.get('/items', { params })),
-  getRecipes: params => withResult(() => axiosInstance.get('/recipes', { params })),
   getDashboardOverview: params =>
     withResult(() => axiosInstance.get('/dashboard/overview', { params })),
   getPerformanceMetrics: params =>

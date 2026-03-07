@@ -199,7 +199,7 @@ export default function DriverDashboard() {
       {/* Issue Report Modal */}
       {showIssueModal && (
         <div className="fixed inset-0 bg-foreground/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-xl border border-border p-6 max-w-md w-full animate-slide-up">
+          <div className="bg-card rounded-xl border border-border p-6 max-w-md w-full max-h-[90vh] overflow-y-auto animate-slide-up">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-warning" />

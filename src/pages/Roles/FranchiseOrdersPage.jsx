@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -313,7 +314,7 @@ export default function FranchiseOrdersPage() {
   };
 
   return (
-    <div className='space-y-6 animate-fade-in'>
+    <div className='min-h-full space-y-6 animate-fade-in'>
       {success && (
         <div className='flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700'>
           <span>{success}</span>
@@ -477,11 +478,11 @@ export default function FranchiseOrdersPage() {
         </div>
       )}
 
-      {/* Modal chi tiết đơn */}
-      {detailId && (
-        <div className='fixed inset-0 z-50 bg-slate-900/40' onClick={() => setDetailId(null)}>
+      {/* Modal chi tiết đơn – render qua Portal để luôn căn giữa viewport */}
+      {detailId && createPortal(
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => setDetailId(null)}>
           <div
-            className='absolute left-1/2 top-1/2 max-h-[90vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
+            className='w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
             onClick={e => e.stopPropagation()}
           >
             <div className='mb-4 flex items-center justify-between'>
@@ -550,14 +551,15 @@ export default function FranchiseOrdersPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Modal đặt hàng – tạo đơn và gửi lên bếp trung tâm */}
-      {createOpen && (
-        <div className='fixed inset-0 z-50 bg-slate-900/40' onClick={() => !creating && setCreateOpen(false)}>
+      {/* Modal đặt hàng – render qua Portal */}
+      {createOpen && createPortal(
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setCreateOpen(false)}>
           <div
-            className='absolute left-1/2 top-1/2 max-h-[90vh] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
+            className='w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
             onClick={e => e.stopPropagation()}
           >
             <div className='mb-4 flex items-center justify-between'>
@@ -675,7 +677,8 @@ export default function FranchiseOrdersPage() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
