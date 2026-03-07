@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   ChevronDown,
+  Undo2,
 } from "lucide-react";
 
 // Phân quyền menu theo yêu cầu:
@@ -163,6 +164,11 @@ const menuByRole = {
       path: "/app/manager/inventory",
     },
     {
+      title: "Xử lý trả hàng",
+      icon: Undo2,
+      path: "/app/manager/returns",
+    },
+    {
       title: "Báo cáo & hiệu suất",
       icon: BarChart3,
       path: "/app/manager/reports",
@@ -238,6 +244,11 @@ const menuByRole = {
       title: "Nhận hàng",
       icon: Package,
       path: "/app/store/receiving",
+    },
+    {
+      title: "Trả hàng",
+      icon: Undo2,
+      path: "/app/store/returns",
     },
     {
       title: "Tồn kho cửa hàng",

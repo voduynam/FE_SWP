@@ -1,0 +1,526 @@
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, RefreshCcw, Search } from 'lucide-react';
+import { workflowService } from '../../services/workflowService';
+
+const RETURN_STATUS = {
+  PENDING: 'Chờ duyệt',
+  APPROVED: 'Đã duyệt',
+  REJECTED: 'Từ chối',
+  PROCESSING: 'Đang xử lý',
+  COMPLETED: 'Hoàn thành',
+  CANCELLED: 'Đã hủy',
+};
+
+const statusColor = {
+  PENDING: 'bg-amber-100 text-amber-700',
+  APPROVED: 'bg-blue-100 text-blue-700',
+  REJECTED: 'bg-red-100 text-red-700',
+  PROCESSING: 'bg-indigo-100 text-indigo-700',
+  COMPLETED: 'bg-emerald-100 text-emerald-700',
+  CANCELLED: 'bg-slate-100 text-slate-600',
+};
+
+const DEFECT_TYPES = {
+  DAMAGED: 'Hư hỏng',
+  EXPIRED: 'Hết hạn',
+  WRONG_ITEM: 'Sai sản phẩm',
+  QUALITY_ISSUE: 'Vấn đề chất lượng',
+  OTHER: 'Khác',
+};
+
+const PAGE_SIZE = 10;
+
+function getList(res) {
+  if (!res?.success) return [];
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.data?.data)) return res.data.data;
+  return [];
+}
+
+export default function StoreReturnRequestPage() {
+  const [returns, setReturns] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+  const [success, setSuccess] = useState('');
+
+  // Detail
+  const [detailId, setDetailId] = useState(null);
+  const [detailReturn, setDetailReturn] = useState(null);
+  const [detailError, setDetailError] = useState(null);
+
+  // Create
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  // Create form
+  const [receipts, setReceipts] = useState([]);
+  const [selectedReceiptId, setSelectedReceiptId] = useState('');
+  const [receiptDetail, setReceiptDetail] = useState(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [returnLines, setReturnLines] = useState([]);
+  const [returnDate, setReturnDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState('');
+
+  /* ─── Load list ─── */
+  const loadReturns = async (page = 1) => {
+    setLoading(true);
+    setSuccess('');
+    try {
+      const res = await workflowService.getReturnRequestsPaginated({
+        page,
+        limit: PAGE_SIZE,
+        ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
+      });
+      if (res.success && res.data) {
+        const list = Array.isArray(res.data.data) ? res.data.data : [];
+        setReturns(list);
+        const p = res.data.pagination ?? {};
+        setPagination({ page: p.page ?? page, limit: p.limit ?? PAGE_SIZE, total: p.total ?? 0, pages: p.pages ?? 1 });
+      } else {
+        setReturns([]);
+      }
+    } catch {
+      setReturns([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadReturns(1); }, [statusFilter]);
+
+  /* ─── Detail ─── */
+  const loadDetail = async id => {
+    setDetailId(id);
+    setDetailReturn(null);
+    setDetailError(null);
+    if (!id) return;
+    const res = await workflowService.getReturnRequest(id);
+    if (res.success && res.data) setDetailReturn(res.data);
+    else setDetailError(res.message || 'Không tìm thấy yêu cầu trả hàng');
+  };
+
+  /* ─── Filter ─── */
+  const filteredReturns = useMemo(() => {
+    const s = (search || '').toLowerCase();
+    return returns.filter(r => {
+      const no = r.return_no || r._id || '';
+      return !s || no.toLowerCase().includes(s);
+    });
+  }, [returns, search]);
+
+  /* ─── Create: load goods receipts ─── */
+  useEffect(() => {
+    if (!createOpen) return;
+    setCreateError('');
+    setSelectedReceiptId('');
+    setReceiptDetail(null);
+    setReturnLines([]);
+    setReason('');
+    const load = async () => {
+      const res = await workflowService.getGoodsReceipts({ status: 'RECEIVED', limit: 100 });
+      setReceipts(getList(res));
+    };
+    load();
+  }, [createOpen]);
+
+  /* ─── When receipt selected → load detail + items for uom_id ─── */
+  useEffect(() => {
+    if (!selectedReceiptId) { setReceiptDetail(null); setReturnLines([]); return; }
+    let cancelled = false;
+    setReceiptLoading(true);
+    workflowService.getGoodsReceipt(selectedReceiptId).then(async res => {
+      if (cancelled) return;
+      if (!res.success || !res.data) { setReceiptLoading(false); setReceiptDetail(null); setReturnLines([]); return; }
+      const receipt = res.data;
+      setReceiptDetail(receipt);
+
+      const itemIds = [...new Set((receipt.lines || []).map(l => l.item_id?._id || l.item_id).filter(Boolean))];
+      let itemMap = {};
+      if (itemIds.length) {
+        const itemRes = await workflowService.getItems({ limit: 100 });
+        const allItems = Array.isArray(itemRes?.data) ? itemRes.data : (itemRes?.data?.data ?? []);
+        allItems.forEach(it => { itemMap[it._id] = it; });
+      }
+
+      const lines = (receipt.lines || []).map(l => {
+        const itemId = l.item_id?._id || l.item_id;
+        const item = itemMap[itemId] || l.item_id || {};
+        const uomId = l.uom_id?._id || l.uom_id || item.base_uom_id?._id || item.base_uom_id || '';
+        return {
+          source_receipt_line_id: l._id,
+          item_id: itemId,
+          item_name: item.name || item.sku || l.item_id?.name || l.item_id?.sku || itemId || '-',
+          uom_id: uomId,
+          uom_name: item.base_uom_id?.code || item.base_uom_id?.name || l.uom_id?.code || '',
+          lot_id: l.lot_id?._id || l.lot_id || '',
+          lot_code: l.lot_id?.lot_code || '',
+          qty_received: l.qty_received || 0,
+          qty_return: 0,
+          defect_type: 'OTHER',
+          notes: '',
+        };
+      });
+      if (!cancelled) setReturnLines(lines);
+      setReceiptLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedReceiptId]);
+
+  /* ─── Line changes ─── */
+  const handleLineChange = (idx, field, value) => {
+    setReturnLines(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: field === 'qty_return' ? (Number(value) || 0) : value };
+      return next;
+    });
+  };
+
+  /* ─── Submit ─── */
+  const submitCreate = async e => {
+    e.preventDefault();
+    setCreating(true);
+    setCreateError('');
+    try {
+      const linesToSend = returnLines
+        .filter(l => l.qty_return > 0)
+        .map(l => ({
+          item_id: l.item_id,
+          uom_id: l.uom_id,
+          qty_return: l.qty_return,
+          ...(l.lot_id ? { lot_id: l.lot_id } : {}),
+          defect_type: l.defect_type || 'OTHER',
+          notes: l.notes || '',
+        }));
+
+      if (!linesToSend.length) {
+        setCreateError('Vui lòng nhập số lượng trả > 0 cho ít nhất 1 sản phẩm.');
+        setCreating(false);
+        return;
+      }
+
+      const overLine = returnLines.find(l => l.qty_return > l.qty_received);
+      if (overLine) {
+        setCreateError(`Số lượng trả "${overLine.item_name}" (${overLine.qty_return}) vượt quá số lượng đã nhận (${overLine.qty_received}).`);
+        setCreating(false);
+        return;
+      }
+
+      const payload = {
+        goods_receipt_id: selectedReceiptId,
+        return_date: returnDate || new Date().toISOString(),
+        reason: reason || '',
+        lines: linesToSend,
+      };
+
+      const res = await workflowService.createReturnRequest(payload);
+      if (!res.success) {
+        setCreateError(res.message || 'Tạo yêu cầu trả hàng thất bại');
+        setCreating(false);
+        return;
+      }
+      setCreateOpen(false);
+      setSuccess('Đã tạo yêu cầu trả hàng (PENDING). Vui lòng chờ phê duyệt.');
+      loadReturns(1);
+    } catch (err) {
+      setCreateError(err?.response?.data?.message || 'Có lỗi khi tạo yêu cầu');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const getItemName = obj => {
+    if (!obj) return '-';
+    if (typeof obj === 'object') return obj.name || obj.sku || obj._id;
+    return obj;
+  };
+
+  return (
+    <div className='min-h-full space-y-6 animate-fade-in'>
+      {success && (
+        <div className='flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700'>
+          <span>{success}</span>
+          <button onClick={() => setSuccess('')} className='text-xs text-emerald-700/70 hover:text-emerald-900'>Đóng</button>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className='flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
+        <div>
+          <h1 className='text-2xl font-bold text-slate-900'>Trả hàng</h1>
+          <p className='mt-1 text-sm text-slate-500'>
+            Tạo yêu cầu trả hàng lỗi/hết hạn cho bếp trung tâm và theo dõi trạng thái xử lý.
+          </p>
+        </div>
+        <div className='flex gap-2'>
+          <button onClick={() => setCreateOpen(true)} className='inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'>
+            <Plus className='h-4 w-4' /> Tạo yêu cầu trả hàng
+          </button>
+          <button onClick={() => loadReturns(1)} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
+            <RefreshCcw className='h-4 w-4' /> Làm mới
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className='flex flex-col gap-3 sm:flex-row'>
+        <div className='relative flex-1'>
+          <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder='Tìm theo số yêu cầu...' className='input-field w-full pl-9' />
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className='input-field min-w-[180px]'>
+          <option value='ALL'>Tất cả trạng thái</option>
+          {Object.entries(RETURN_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm'>
+        <table className='w-full text-sm'>
+          <thead className='bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+            <tr>
+              <th className='px-4 py-3'>Số yêu cầu</th>
+              <th className='px-4 py-3'>Phiếu nhận hàng</th>
+              <th className='px-4 py-3'>Ngày yêu cầu</th>
+              <th className='px-4 py-3'>Trạng thái</th>
+              <th className='px-4 py-3'>Lý do</th>
+              <th className='px-4 py-3 text-right'>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody className='divide-y divide-slate-100'>
+            {loading && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
+            {!loading && !filteredReturns.length && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Chưa có yêu cầu trả hàng nào.</td></tr>}
+            {!loading && filteredReturns.map(r => (
+              <tr key={r._id}>
+                <td className='px-4 py-3 font-medium text-slate-900'>{r.return_no || r._id}</td>
+                <td className='px-4 py-3 text-slate-700'>{r.goods_receipt_id?.receipt_no || r.source_receipt_id?.receipt_no || '-'}</td>
+                <td className='px-4 py-3 text-slate-700'>{r.return_date ? new Date(r.return_date).toLocaleDateString('vi-VN') : r.request_date ? new Date(r.request_date).toLocaleDateString('vi-VN') : '-'}</td>
+                <td className='px-4 py-3'>
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColor[r.status] || 'bg-slate-100 text-slate-700'}`}>
+                    {RETURN_STATUS[r.status] || r.status}
+                  </span>
+                </td>
+                <td className='px-4 py-3 text-slate-700 max-w-[200px] truncate'>{r.reason || '-'}</td>
+                <td className='px-4 py-3 text-right'>
+                  <button onClick={() => loadDetail(r._id)} className='rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'>Chi tiết</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {pagination.total > 0 && (
+        <div className='flex items-center justify-between text-sm text-slate-500'>
+          <p>Hiển thị {(pagination.page - 1) * pagination.limit + 1} - {Math.min(pagination.page * pagination.limit, pagination.total)} / {pagination.total}</p>
+          <div className='flex items-center gap-2'>
+            <button type='button' onClick={() => loadReturns(pagination.page - 1)} disabled={pagination.page <= 1} className='rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50 hover:bg-slate-50'>Trước</button>
+            <span>Trang {pagination.page} / {Math.max(1, pagination.pages)}</span>
+            <button type='button' onClick={() => loadReturns(pagination.page + 1)} disabled={pagination.page >= Math.max(1, pagination.pages)} className='rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50 hover:bg-slate-50'>Sau</button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Detail Modal ─── */}
+      {detailId && createPortal(
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => setDetailId(null)}>
+          <div className='w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
+            <div className='mb-4 flex items-center justify-between'>
+              <h2 className='text-lg font-semibold text-slate-900'>Chi tiết yêu cầu trả hàng</h2>
+              <button onClick={() => setDetailId(null)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+            </div>
+            {!detailReturn && !detailError && <p className='text-sm text-slate-500'>Đang tải...</p>}
+            {detailError && <p className='text-sm text-red-600'>{detailError}</p>}
+            {detailReturn && (
+              <div className='space-y-4'>
+                <div className='rounded-lg border border-slate-200 bg-slate-50/50 p-3'>
+                  <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
+                    <span className='text-slate-500'>Số yêu cầu:</span>
+                    <span className='font-medium'>{detailReturn.return_no || detailReturn._id}</span>
+                    <span className='text-slate-500'>Phiếu nhận hàng:</span>
+                    <span className='font-medium'>{detailReturn.goods_receipt_id?.receipt_no || detailReturn.source_receipt_id?.receipt_no || '-'}</span>
+                    <span className='text-slate-500'>Ngày yêu cầu:</span>
+                    <span>{detailReturn.return_date ? new Date(detailReturn.return_date).toLocaleDateString('vi-VN') : '-'}</span>
+                    <span className='text-slate-500'>Trạng thái:</span>
+                    <span>
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColor[detailReturn.status] || 'bg-slate-100 text-slate-700'}`}>
+                        {RETURN_STATUS[detailReturn.status] || detailReturn.status}
+                      </span>
+                    </span>
+                    <span className='text-slate-500'>Lý do:</span>
+                    <span>{detailReturn.reason || '-'}</span>
+                    {detailReturn.resolution_notes && (
+                      <>
+                        <span className='text-slate-500'>Ghi chú xử lý:</span>
+                        <span>{detailReturn.resolution_notes}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className='rounded-lg border border-slate-200 bg-white p-3'>
+                  <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Quy trình trả hàng</h3>
+                  <ol className='space-y-1 text-sm'>
+                    <li className={detailReturn.status ? 'text-slate-700' : 'text-slate-400'}>1. Tạo yêu cầu (PENDING) — Chọn phiếu nhận, sản phẩm, số lượng, lý do</li>
+                    <li className={['APPROVED', 'PROCESSING', 'COMPLETED'].includes(detailReturn.status) ? 'text-slate-700' : 'text-slate-400'}>2. Phê duyệt (APPROVED) — Manager/Admin duyệt yêu cầu</li>
+                    <li className={detailReturn.status === 'COMPLETED' ? 'text-slate-700' : 'text-slate-400'}>3. Xử lý & hoàn thành (COMPLETED) — Trừ tồn kho cửa hàng</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <h3 className='mb-2 text-sm font-medium text-slate-700'>Chi tiết sản phẩm trả</h3>
+                  <table className='w-full text-sm'>
+                    <thead className='bg-slate-50 text-left text-xs text-slate-500'>
+                      <tr>
+                        <th className='px-3 py-2'>Sản phẩm</th>
+                        <th className='px-3 py-2'>Số lượng</th>
+                        <th className='px-3 py-2'>Loại lỗi</th>
+                        <th className='px-3 py-2'>Ghi chú</th>
+                      </tr>
+                    </thead>
+                    <tbody className='divide-y divide-slate-100'>
+                      {(detailReturn.lines || []).map((line, idx) => (
+                        <tr key={line._id || idx}>
+                          <td className='px-3 py-2'>{getItemName(line.item_id)}</td>
+                          <td className='px-3 py-2'>{line.qty_return ?? line.qty_requested ?? 0}</td>
+                          <td className='px-3 py-2'>
+                            <span className='inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs'>
+                              {DEFECT_TYPES[line.defect_type] || line.defect_type || '-'}
+                            </span>
+                          </td>
+                          <td className='px-3 py-2 text-slate-600'>{line.notes || line.reason || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ─── Create Modal ─── */}
+      {createOpen && createPortal(
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setCreateOpen(false)}>
+          <div className='w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
+            <div className='mb-4 flex items-center justify-between'>
+              <h2 className='text-lg font-semibold text-slate-900'>Tạo yêu cầu trả hàng</h2>
+              <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+            </div>
+            {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
+
+            <form onSubmit={submitCreate} className='space-y-4'>
+              <div>
+                <label className='block text-sm font-medium text-slate-700'>Chọn phiếu nhận hàng (đã nhận)</label>
+                <select
+                  value={selectedReceiptId}
+                  onChange={e => setSelectedReceiptId(e.target.value)}
+                  className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+                  required
+                >
+                  <option value=''>-- Chọn phiếu nhận hàng --</option>
+                  {receipts.map(r => (
+                    <option key={r._id} value={r._id}>
+                      {r.receipt_no || r._id} — {r.received_date ? new Date(r.received_date).toLocaleDateString('vi-VN') : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Ngày yêu cầu trả</label>
+                  <input type='date' value={returnDate} onChange={e => setReturnDate(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Lý do chung</label>
+                  <input type='text' value={reason} onChange={e => setReason(e.target.value)} placeholder='VD: Hàng bị hư hỏng trong quá trình vận chuyển' className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' />
+                </div>
+              </div>
+
+              {receiptLoading && <p className='text-sm text-slate-500'>Đang tải chi tiết phiếu nhận...</p>}
+
+              {receiptDetail && returnLines.length > 0 && !receiptLoading && (
+                <div className='space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
+                  <div className='text-sm font-medium text-slate-700'>
+                    Chọn sản phẩm cần trả và nhập số lượng, loại lỗi
+                  </div>
+                  <div className='overflow-x-auto'>
+                    <table className='w-full text-sm'>
+                      <thead className='text-left text-xs text-slate-500'>
+                        <tr>
+                          <th className='px-2 py-2'>Sản phẩm</th>
+                          <th className='px-2 py-2'>Đã nhận</th>
+                          <th className='px-2 py-2'>SL trả</th>
+                          <th className='px-2 py-2'>Loại lỗi</th>
+                          <th className='px-2 py-2'>Ghi chú</th>
+                        </tr>
+                      </thead>
+                      <tbody className='divide-y divide-slate-100 bg-white'>
+                        {returnLines.map((line, idx) => (
+                          <tr key={idx}>
+                            <td className='px-2 py-2 font-medium text-slate-800'>
+                              {line.item_name}
+                              {line.lot_code && <span className='ml-1 text-xs text-slate-400'>(Lô: {line.lot_code})</span>}
+                            </td>
+                            <td className='px-2 py-2 text-slate-600'>{line.qty_received}</td>
+                            <td className='px-2 py-2'>
+                              <input
+                                type='number'
+                                min={0}
+                                max={line.qty_received}
+                                value={line.qty_return}
+                                onChange={e => handleLineChange(idx, 'qty_return', e.target.value)}
+                                className='w-20 rounded border border-slate-200 px-2 py-1 text-sm'
+                              />
+                            </td>
+                            <td className='px-2 py-2'>
+                              <select
+                                value={line.defect_type}
+                                onChange={e => handleLineChange(idx, 'defect_type', e.target.value)}
+                                className='rounded border border-slate-200 px-2 py-1 text-sm'
+                              >
+                                {Object.entries(DEFECT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                              </select>
+                            </td>
+                            <td className='px-2 py-2'>
+                              <input
+                                type='text'
+                                value={line.notes}
+                                onChange={e => handleLineChange(idx, 'notes', e.target.value)}
+                                placeholder='Ghi chú...'
+                                className='w-full min-w-[120px] rounded border border-slate-200 px-2 py-1 text-sm'
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
+                <button type='button' disabled={creating} onClick={() => setCreateOpen(false)} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
+                <button
+                  type='submit'
+                  disabled={creating || !selectedReceiptId || receiptLoading || returnLines.length === 0}
+                  className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
+                >
+                  {creating ? 'Đang tạo...' : 'Gửi yêu cầu trả hàng'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}

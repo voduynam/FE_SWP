@@ -165,6 +165,29 @@ export const workflowService = {
   getDeliveryRoutes: params =>
     withResult(() => axiosInstance.get('/delivery-routes', { params })),
 
+  // Return requests – Flow 5
+  getReturnRequests: params =>
+    withResult(() => axiosInstance.get('/return-requests', { params })),
+  getReturnRequestsPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/return-requests', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+    }
+  },
+  getReturnRequest: id =>
+    withResult(() => axiosInstance.get(`/return-requests/${id}`)),
+  getReturnRequestsByStore: storeId =>
+    withResult(() => axiosInstance.get(`/return-requests/by-store/${storeId}`)),
+  createReturnRequest: payload =>
+    withResult(() => axiosInstance.post('/return-requests', payload)),
+  updateReturnRequestStatus: (id, payload) =>
+    withResult(() => axiosInstance.put(`/return-requests/${id}/status`, payload)),
+  processReturnRequest: id =>
+    withResult(() => axiosInstance.put(`/return-requests/${id}/process`)),
+
   // Supply coordination
   getConsolidatedOrders: params =>
     withResult(() => axiosInstance.get('/consolidated-orders', { params })),

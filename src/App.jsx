@@ -33,11 +33,14 @@ import RecipesPage from './pages/Roles/RecipesPage';
 import FranchiseOrdersPage from './pages/Roles/FranchiseOrdersPage';
 import FranchiseInventoryPage from './pages/Roles/FranchiseInventoryPage';
 import GoodsReceiptPage from './pages/Roles/GoodsReceiptPage';
+import StoreReturnRequestPage from './pages/Roles/StoreReturnRequestPage';
 // Central kitchen pages
 import CentralOrdersPage from './pages/Roles/CentralOrdersPage';
 import CentralProductionPage from './pages/Roles/CentralProductionPage';
 import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
 import CentralShipmentsPage from './pages/Roles/CentralShipmentsPage';
+// Manager pages (returns)
+import ManagerReturnRequestPage from './pages/Roles/ManagerReturnRequestPage';
 // Supply coordinator pages
 import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
 import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
@@ -93,6 +96,7 @@ function AppContent() {
           <Route path='products' element={<ManagerProductsPage />} />
           <Route path='recipes' element={<RecipesPage />} />
           <Route path='inventory' element={<ManagerInventoryPage />} />
+          <Route path='returns' element={<ManagerReturnRequestPage />} />
           <Route path='reports' element={<ManagerReportsPage />} />
         </Route>
 
@@ -118,6 +122,7 @@ function AppContent() {
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='orders' element={<FranchiseOrdersPage />} />
           <Route path='receiving' element={<GoodsReceiptPage />} />
+          <Route path='returns' element={<StoreReturnRequestPage />} />
           <Route path='inventory' element={<FranchiseInventoryPage />} />
         </Route>
 
