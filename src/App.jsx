@@ -31,6 +31,7 @@ import ManagerReportsPage from './pages/Roles/ManagerReportsPage';
 // Franchise store pages
 import FranchiseOrdersPage from './pages/Roles/FranchiseOrdersPage';
 import FranchiseInventoryPage from './pages/Roles/FranchiseInventoryPage';
+import GoodsReceiptPage from './pages/Roles/GoodsReceiptPage';
 // Central kitchen pages
 import CentralOrdersPage from './pages/Roles/CentralOrdersPage';
 import CentralProductionPage from './pages/Roles/CentralProductionPage';
@@ -112,6 +113,7 @@ function AppContent() {
         <Route path='store'>
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='orders' element={<FranchiseOrdersPage />} />
+          <Route path='receiving' element={<GoodsReceiptPage />} />
           <Route path='inventory' element={<FranchiseInventoryPage />} />
         </Route>
 

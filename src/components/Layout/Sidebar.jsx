@@ -220,6 +220,11 @@ const menuByRole = {
       path: "/app/store/orders",
     },
     {
+      title: "Nhận hàng",
+      icon: Package,
+      path: "/app/store/receiving",
+    },
+    {
       title: "Tồn kho cửa hàng",
       icon: Warehouse,
       path: "/app/store/inventory",
