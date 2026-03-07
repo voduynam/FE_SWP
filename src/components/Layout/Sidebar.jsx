@@ -124,6 +124,11 @@ const menuByRole = {
       path: "/app/admin/stores",
     },
     {
+      title: "Công thức sản xuất",
+      icon: ChefHat,
+      path: "/app/manager/recipes",
+    },
+    {
       title: "Báo cáo hệ thống",
       icon: BarChart3,
       path: "/app/admin/reports",
@@ -146,6 +151,11 @@ const menuByRole = {
       title: "Sản phẩm & công thức",
       icon: Package,
       path: "/app/manager/products",
+    },
+    {
+      title: "Công thức sản xuất",
+      icon: ChefHat,
+      path: "/app/manager/recipes",
     },
     {
       title: "Tồn kho hệ thống",

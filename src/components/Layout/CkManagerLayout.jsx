@@ -33,7 +33,7 @@ const CkManagerLayout = () => {
     user?.full_name || user?.username || user?.name || "Người dùng";
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
+    <div className="h-screen flex bg-gray-50">
       <Sidebar
         userRole={sidebarRole}
         userName={displayName}
@@ -41,10 +41,8 @@ const CkManagerLayout = () => {
         isCollapsed={isCollapsed}
         setIsCollapsed={setIsCollapsed}
       />
-      <main
-        className="flex-1 min-w-0 overflow-auto transition-all duration-300"
-      >
-        <div className="w-full p-4 lg:p-6 xl:p-8">
+      <main className="flex-1 min-h-0 min-w-0 overflow-auto transition-all duration-300">
+        <div className="w-full min-h-full p-4 lg:p-6 xl:p-8">
           <Outlet />
         </div>
       </main>

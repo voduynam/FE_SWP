@@ -28,6 +28,7 @@ import AdminReportsPage from './pages/Roles/AdminReportsPage';
 import ManagerProductsPage from './pages/Roles/ManagerProductsPage';
 import ManagerInventoryPage from './pages/Roles/ManagerInventoryPage';
 import ManagerReportsPage from './pages/Roles/ManagerReportsPage';
+import RecipesPage from './pages/Roles/RecipesPage';
 // Franchise store pages
 import FranchiseOrdersPage from './pages/Roles/FranchiseOrdersPage';
 import FranchiseInventoryPage from './pages/Roles/FranchiseInventoryPage';
@@ -89,6 +90,7 @@ function AppContent() {
         <Route path='manager'>
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='products' element={<ManagerProductsPage />} />
+          <Route path='recipes' element={<RecipesPage />} />
           <Route path='inventory' element={<ManagerInventoryPage />} />
           <Route path='reports' element={<ManagerReportsPage />} />
         </Route>
