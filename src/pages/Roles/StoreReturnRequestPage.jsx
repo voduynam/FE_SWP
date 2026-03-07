@@ -29,6 +29,12 @@ const DEFECT_TYPES = {
   OTHER: 'Khác',
 };
 
+const DISPOSITION_TYPES = {
+  RESTOCK: 'Nhập lại kho',
+  DESTROY: 'Hủy bỏ',
+  RETURN_TO_SUPPLIER: 'Trả nhà cung cấp',
+};
+
 const PAGE_SIZE = 10;
 
 function getList(res) {
@@ -99,8 +105,20 @@ export default function StoreReturnRequestPage() {
     setDetailError(null);
     if (!id) return;
     const res = await workflowService.getReturnRequest(id);
-    if (res.success && res.data) setDetailReturn(res.data);
-    else setDetailError(res.message || 'Không tìm thấy yêu cầu trả hàng');
+    if (res.success && res.data) {
+      const data = res.data;
+      const lines = Array.isArray(data.lines) ? data.lines
+        : Array.isArray(data.return_lines) ? data.return_lines
+        : [];
+      setDetailReturn({ ...data, lines });
+    } else {
+      setDetailError(res.message || 'Không tìm thấy yêu cầu trả hàng');
+    }
+  };
+
+  const closeDetail = () => {
+    setDetailId(null);
+    loadReturns(pagination.page);
   };
 
   /* ─── Filter ─── */
@@ -112,7 +130,7 @@ export default function StoreReturnRequestPage() {
     });
   }, [returns, search]);
 
-  /* ─── Create: load goods receipts ─── */
+  /* ─── Create: load goods receipts (deduplicated) ─── */
   useEffect(() => {
     if (!createOpen) return;
     setCreateError('');
@@ -122,7 +140,20 @@ export default function StoreReturnRequestPage() {
     setReason('');
     const load = async () => {
       const res = await workflowService.getGoodsReceipts({ status: 'RECEIVED', limit: 100 });
-      setReceipts(getList(res));
+      const raw = getList(res);
+      const unique = [...new Map(raw.map(r => [r._id, r])).values()];
+
+      const rrRes = await workflowService.getReturnRequests({ limit: 200 });
+      const allReturns = getList(rrRes);
+      const activeStatuses = ['PENDING', 'APPROVED', 'PROCESSING'];
+      const receiptHasActive = new Set(
+        allReturns
+          .filter(rr => activeStatuses.includes(rr.status))
+          .map(rr => rr.goods_receipt_id?._id || rr.goods_receipt_id || '')
+          .filter(Boolean)
+      );
+
+      setReceipts(unique.map(r => ({ ...r, _hasActiveReturn: receiptHasActive.has(r._id) })));
     };
     load();
   }, [createOpen]);
@@ -161,6 +192,7 @@ export default function StoreReturnRequestPage() {
           qty_received: l.qty_received || 0,
           qty_return: 0,
           defect_type: 'OTHER',
+          disposition: 'RESTOCK',
           notes: '',
         };
       });
@@ -193,6 +225,7 @@ export default function StoreReturnRequestPage() {
           qty_return: l.qty_return,
           ...(l.lot_id ? { lot_id: l.lot_id } : {}),
           defect_type: l.defect_type || 'OTHER',
+          disposition: l.disposition || 'RESTOCK',
           notes: l.notes || '',
         }));
 
@@ -327,11 +360,11 @@ export default function StoreReturnRequestPage() {
 
       {/* ─── Detail Modal ─── */}
       {detailId && createPortal(
-        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => setDetailId(null)}>
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={closeDetail}>
           <div className='w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
             <div className='mb-4 flex items-center justify-between'>
               <h2 className='text-lg font-semibold text-slate-900'>Chi tiết yêu cầu trả hàng</h2>
-              <button onClick={() => setDetailId(null)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+              <button onClick={closeDetail} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {!detailReturn && !detailError && <p className='text-sm text-slate-500'>Đang tải...</p>}
             {detailError && <p className='text-sm text-red-600'>{detailError}</p>}
@@ -379,10 +412,18 @@ export default function StoreReturnRequestPage() {
                         <th className='px-3 py-2'>Sản phẩm</th>
                         <th className='px-3 py-2'>Số lượng</th>
                         <th className='px-3 py-2'>Loại lỗi</th>
+                        <th className='px-3 py-2'>Xử lý</th>
                         <th className='px-3 py-2'>Ghi chú</th>
                       </tr>
                     </thead>
                     <tbody className='divide-y divide-slate-100'>
+                      {(detailReturn.lines || []).length === 0 && (
+                        <tr>
+                          <td colSpan={5} className='px-3 py-6 text-center text-sm text-slate-400'>
+                            Không có dữ liệu chi tiết sản phẩm trả.
+                          </td>
+                        </tr>
+                      )}
                       {(detailReturn.lines || []).map((line, idx) => (
                         <tr key={line._id || idx}>
                           <td className='px-3 py-2'>{getItemName(line.item_id)}</td>
@@ -390,6 +431,11 @@ export default function StoreReturnRequestPage() {
                           <td className='px-3 py-2'>
                             <span className='inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs'>
                               {DEFECT_TYPES[line.defect_type] || line.defect_type || '-'}
+                            </span>
+                          </td>
+                          <td className='px-3 py-2'>
+                            <span className='inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs'>
+                              {DISPOSITION_TYPES[line.disposition] || line.disposition || 'Nhập lại kho'}
                             </span>
                           </td>
                           <td className='px-3 py-2 text-slate-600'>{line.notes || line.reason || '-'}</td>
@@ -425,12 +471,15 @@ export default function StoreReturnRequestPage() {
                   required
                 >
                   <option value=''>-- Chọn phiếu nhận hàng --</option>
-                  {receipts.map(r => (
+                  {receipts.filter(r => !r._hasActiveReturn).map(r => (
                     <option key={r._id} value={r._id}>
                       {r.receipt_no || r._id} — {r.received_date ? new Date(r.received_date).toLocaleDateString('vi-VN') : ''}
                     </option>
                   ))}
                 </select>
+                {receipts.length > 0 && receipts.every(r => r._hasActiveReturn) && (
+                  <p className='mt-1 text-xs text-amber-600'>Tất cả phiếu nhận hàng đã có yêu cầu trả đang xử lý.</p>
+                )}
               </div>
 
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
@@ -459,6 +508,7 @@ export default function StoreReturnRequestPage() {
                           <th className='px-2 py-2'>Đã nhận</th>
                           <th className='px-2 py-2'>SL trả</th>
                           <th className='px-2 py-2'>Loại lỗi</th>
+                          <th className='px-2 py-2'>Xử lý</th>
                           <th className='px-2 py-2'>Ghi chú</th>
                         </tr>
                       </thead>
@@ -487,6 +537,15 @@ export default function StoreReturnRequestPage() {
                                 className='rounded border border-slate-200 px-2 py-1 text-sm'
                               >
                                 {Object.entries(DEFECT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                              </select>
+                            </td>
+                            <td className='px-2 py-2'>
+                              <select
+                                value={line.disposition}
+                                onChange={e => handleLineChange(idx, 'disposition', e.target.value)}
+                                className='rounded border border-slate-200 px-2 py-1 text-sm'
+                              >
+                                {Object.entries(DISPOSITION_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                               </select>
                             </td>
                             <td className='px-2 py-2'>

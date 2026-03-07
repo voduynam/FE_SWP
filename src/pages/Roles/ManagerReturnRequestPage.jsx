@@ -29,6 +29,12 @@ const DEFECT_TYPES = {
   OTHER: 'Khác',
 };
 
+const DISPOSITION_TYPES = {
+  RESTOCK: 'Nhập lại kho',
+  DESTROY: 'Hủy bỏ',
+  RETURN_TO_SUPPLIER: 'Trả nhà cung cấp',
+};
+
 const PAGE_SIZE = 10;
 
 export default function ManagerReturnRequestPage() {
@@ -85,8 +91,20 @@ export default function ManagerReturnRequestPage() {
     setRejectNotes('');
     if (!id) return;
     const res = await workflowService.getReturnRequest(id);
-    if (res.success && res.data) setDetailReturn(res.data);
-    else setDetailError(res.message || 'Không tìm thấy yêu cầu trả hàng');
+    if (res.success && res.data) {
+      const data = res.data;
+      const lines = Array.isArray(data.lines) ? data.lines
+        : Array.isArray(data.return_lines) ? data.return_lines
+        : [];
+      setDetailReturn({ ...data, lines });
+    } else {
+      setDetailError(res.message || 'Không tìm thấy yêu cầu trả hàng');
+    }
+  };
+
+  const closeDetail = () => {
+    setDetailId(null);
+    loadReturns(pagination.page);
   };
 
   /* ─── Status actions ─── */
@@ -97,7 +115,7 @@ export default function ManagerReturnRequestPage() {
       const res = await workflowService.updateReturnRequestStatus(ret._id, { status: 'APPROVED' });
       if (res.success) {
         setSuccess(`Đã phê duyệt yêu cầu ${ret.return_no || ret._id}.`);
-        setDetailReturn(prev => prev?._id === ret._id ? { ...prev, status: 'APPROVED' } : prev);
+        await loadDetail(ret._id);
         loadReturns(pagination.page);
       } else alert(res.message || 'Phê duyệt thất bại');
     } catch (err) {
@@ -118,9 +136,9 @@ export default function ManagerReturnRequestPage() {
       });
       if (res.success) {
         setSuccess(`Đã từ chối yêu cầu ${ret.return_no || ret._id}.`);
-        setDetailReturn(prev => prev?._id === ret._id ? { ...prev, status: 'REJECTED', resolution_notes: rejectNotes } : prev);
         setRejectOpen(false);
         setRejectNotes('');
+        await loadDetail(ret._id);
         loadReturns(pagination.page);
       } else alert(res.message || 'Từ chối thất bại');
     } catch (err) {
@@ -137,7 +155,7 @@ export default function ManagerReturnRequestPage() {
       const res = await workflowService.processReturnRequest(ret._id);
       if (res.success) {
         setSuccess(`Đã xử lý hoàn thành. Tồn kho cửa hàng đã được trừ.`);
-        setDetailReturn(prev => prev?._id === ret._id ? { ...prev, status: 'COMPLETED' } : prev);
+        await loadDetail(ret._id);
         loadReturns(pagination.page);
       } else alert(res.message || 'Xử lý thất bại');
     } catch (err) {
@@ -154,7 +172,7 @@ export default function ManagerReturnRequestPage() {
       const res = await workflowService.updateReturnRequestStatus(ret._id, { status: 'CANCELLED' });
       if (res.success) {
         setSuccess(`Đã hủy yêu cầu ${ret.return_no || ret._id}.`);
-        setDetailReturn(prev => prev?._id === ret._id ? { ...prev, status: 'CANCELLED' } : prev);
+        await loadDetail(ret._id);
         loadReturns(pagination.page);
       } else alert(res.message || 'Hủy thất bại');
     } catch (err) {
@@ -271,11 +289,11 @@ export default function ManagerReturnRequestPage() {
 
       {/* ─── Detail Modal ─── */}
       {detailId && createPortal(
-        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => setDetailId(null)}>
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={closeDetail}>
           <div className='w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
             <div className='mb-4 flex items-center justify-between'>
               <h2 className='text-lg font-semibold text-slate-900'>Chi tiết yêu cầu trả hàng</h2>
-              <button onClick={() => setDetailId(null)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+              <button onClick={closeDetail} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {!detailReturn && !detailError && <p className='text-sm text-slate-500'>Đang tải...</p>}
             {detailError && <p className='text-sm text-red-600'>{detailError}</p>}
@@ -318,10 +336,18 @@ export default function ManagerReturnRequestPage() {
                         <th className='px-3 py-2'>Số lượng trả</th>
                         <th className='px-3 py-2'>ĐVT</th>
                         <th className='px-3 py-2'>Loại lỗi</th>
+                        <th className='px-3 py-2'>Xử lý</th>
                         <th className='px-3 py-2'>Ghi chú</th>
                       </tr>
                     </thead>
                     <tbody className='divide-y divide-slate-100'>
+                      {(detailReturn.lines || []).length === 0 && (
+                        <tr>
+                          <td colSpan={6} className='px-3 py-6 text-center text-sm text-slate-400'>
+                            Không có dữ liệu chi tiết sản phẩm trả.
+                          </td>
+                        </tr>
+                      )}
                       {(detailReturn.lines || []).map((line, idx) => (
                         <tr key={line._id || idx}>
                           <td className='px-3 py-2'>{getItemName(line.item_id)}</td>
@@ -330,6 +356,11 @@ export default function ManagerReturnRequestPage() {
                           <td className='px-3 py-2'>
                             <span className='inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs'>
                               {DEFECT_TYPES[line.defect_type] || line.defect_type || '-'}
+                            </span>
+                          </td>
+                          <td className='px-3 py-2'>
+                            <span className='inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-xs'>
+                              {DISPOSITION_TYPES[line.disposition] || line.disposition || 'Nhập lại kho'}
                             </span>
                           </td>
                           <td className='px-3 py-2 text-slate-600'>{line.notes || line.reason || '-'}</td>
