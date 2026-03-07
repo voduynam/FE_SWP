@@ -235,13 +235,51 @@ export const workflowService = {
   getProductionEfficiency: params =>
     withResult(() => axiosInstance.get('/performance-metrics/production-efficiency', { params })),
 
-  // Inventory + alerts
+  // Inventory – Flow 6
   getInventoryBalances: params =>
     withResult(() => axiosInstance.get('/inventory/balances', { params })),
+  getInventoryBalancesPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/inventory/balances', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+    }
+  },
+  getInventoryByLocation: (locationId, params) =>
+    withResult(() => axiosInstance.get(`/inventory/by-location/${locationId}`, { params })),
+  getInventoryByItem: (itemId, params) =>
+    withResult(() => axiosInstance.get(`/inventory/by-item/${itemId}`, { params })),
+  getInventoryTransactions: async params => {
+    try {
+      const response = await axiosInstance.get('/inventory/transactions', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+    }
+  },
   getInventorySummary: params =>
     withResult(() => axiosInstance.get('/inventory/summary', { params })),
   getInventoryExpiring: params =>
     withResult(() => axiosInstance.get('/inventory/expiring', { params })),
+  adjustInventory: payload =>
+    withResult(() => axiosInstance.post('/inventory/adjust', payload)),
+
+  // Lot management
+  getLot: id =>
+    withResult(() => axiosInstance.get(`/lots/${id}`)),
+  getLotsByItem: (itemId, params) =>
+    withResult(() => axiosInstance.get(`/lots/by-item/${itemId}`, { params })),
+  getExpiringLots: params =>
+    withResult(() => axiosInstance.get('/lots/expiring', { params })),
+  createLot: payload =>
+    withResult(() => axiosInstance.post('/lots', payload)),
+  updateLot: (id, payload) =>
+    withResult(() => axiosInstance.put(`/lots/${id}`, payload)),
+
+  // Alerts
   getAlertsSummary: params =>
     withResult(() => axiosInstance.get('/alerts/summary', { params })),
   getAlertsLowStock: params =>
