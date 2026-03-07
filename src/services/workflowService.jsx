@@ -24,12 +24,39 @@ const withResult = async request => {
 };
 
 export const workflowService = {
-  // Internal orders
+  // Internal orders – Flow 1: Đặt hàng nội bộ
   getInternalOrders: params =>
     withResult(() => axiosInstance.get('/internal-orders', { params })),
+  /** Returns full BE response: { data: [], pagination: { page, limit, total, pages } } */
+  getInternalOrdersPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/internal-orders', { params });
+      const payload = response?.data ?? {};
+      return {
+        success: true,
+        data: payload,
+        message: payload.message || '',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
+    }
+  },
+  getInternalOrder: id =>
+    withResult(() => axiosInstance.get(`/internal-orders/${id}`)),
+  createInternalOrder: payload =>
+    withResult(() => axiosInstance.post('/internal-orders', payload)),
   updateInternalOrderStatus: (id, status) =>
     withResult(() =>
       axiosInstance.put(`/internal-orders/${id}/status`, { status })
+    ),
+  addInternalOrderLine: (orderId, line) =>
+    withResult(() =>
+      axiosInstance.post(`/internal-orders/${orderId}/lines`, line)
     ),
 
   // Production
@@ -41,8 +68,35 @@ export const workflowService = {
   // Shipments & logistics
   getShipments: params =>
     withResult(() => axiosInstance.get('/shipments', { params })),
+  getShipment: id =>
+    withResult(() => axiosInstance.get(`/shipments/${id}`)),
   getGoodsReceipts: params =>
     withResult(() => axiosInstance.get('/goods-receipts', { params })),
+  /** Returns full BE response: { success, data: { data: [], pagination: { page, limit, total, pages } } } */
+  getGoodsReceiptsPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/goods-receipts', { params });
+      const payload = response?.data ?? {};
+      return {
+        success: true,
+        data: payload,
+        message: payload.message || '',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
+    }
+  },
+  getGoodsReceipt: id =>
+    withResult(() => axiosInstance.get(`/goods-receipts/${id}`)),
+  createGoodsReceipt: payload =>
+    withResult(() => axiosInstance.post('/goods-receipts', payload)),
+  confirmGoodsReceipt: (id, payload = { status: 'RECEIVED' }) =>
+    withResult(() => axiosInstance.put(`/goods-receipts/${id}/confirm`, payload)),
   getDeliveryRoutes: params =>
     withResult(() => axiosInstance.get('/delivery-routes', { params })),
 

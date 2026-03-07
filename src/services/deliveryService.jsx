@@ -1,32 +1,34 @@
 import axiosInstance from '../utils/axiosInstance';
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-
 export const deliveryService = {
-  // Get deliveries with optional filters
+  /**
+   * Lấy danh sách giao hàng. BE có /api/delivery-routes (không có /deliveries).
+   * Gọi delivery-routes để tránh 404; trả về mảng rỗng nếu API lỗi.
+   */
   getDeliveries: async (filters = {}) => {
     try {
-      const response = await axiosInstance.get('/deliveries', {
-        params: filters,
+      const response = await axiosInstance.get('/delivery-routes', {
+        params: { limit: 100, ...filters },
       });
 
-      if (response.data.success) {
+      const payload = response?.data ?? {};
+      if (payload.success !== false) {
+        const list = Array.isArray(payload.data) ? payload.data : [];
         return {
           success: true,
-          data: response.data.data || [],
-          message: response.data.message,
+          data: list,
+          message: payload.message,
+          isMock: false,
         };
       }
 
       return {
         success: false,
-        error: response.data.message || 'Không thể tải danh sách vận chuyển',
+        error: payload.message || 'Không thể tải danh sách',
         data: [],
       };
     } catch (error) {
-      // Fallback to mock data if API is not available
-      console.warn('API error, using mock data:', error);
+      // BE có thể chưa có endpoint hoặc lỗi mạng → trả về rỗng, không log warning
       return {
         success: true,
         data: [],
