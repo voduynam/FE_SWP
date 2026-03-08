@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { useAuth } from "../../contexts/AuthContext";
+import AlertsBadge from "../alerts/AlertsBadge";
+import NotificationBell from "../notifications/NotificationBell";
 
 const normalizeRoleCode = (code) => {
   const upper = (code || "").toUpperCase();
@@ -43,6 +45,10 @@ const CkManagerLayout = () => {
       />
       <main className="flex-1 min-h-0 min-w-0 overflow-auto transition-all duration-300">
         <div className="w-full min-h-full p-4 lg:p-6 xl:p-8">
+          <div className="mb-4 flex items-center justify-end gap-3">
+            <AlertsBadge />
+            <NotificationBell />
+          </div>
           <Outlet />
         </div>
       </main>

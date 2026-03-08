@@ -75,7 +75,7 @@ export default function RecipesPage() {
 
   const loadItems = async () => {
     const res = await workflowService.getItems({ status: 'ACTIVE', limit: 200 });
-    setItems(getList(res).concat(Array.isArray(res?.data) ? res.data : []));
+    setItems(getList(res));
   };
 
   useEffect(() => {
@@ -94,6 +94,14 @@ export default function RecipesPage() {
       });
     }
   }, [createOpen]);
+
+  const finishedItems = useMemo(
+    () =>
+      items.filter(
+        (i) => String(i.item_type || '').trim().toUpperCase() === 'FINISHED'
+      ),
+    [items]
+  );
 
   const loadDetail = async (id) => {
     setDetailId(id);
@@ -519,7 +527,11 @@ export default function RecipesPage() {
                   <label className='block text-sm font-medium text-slate-700'>Sản phẩm (thành phẩm)</label>
                   <select value={newRecipe.item_id} onChange={e => setNewRecipe(p => ({ ...p, item_id: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm' required>
                     <option value=''>Chọn sản phẩm</option>
-                    {items.map(i => <option key={i._id} value={i._id}>{getItemName(i)}</option>)}
+                    {finishedItems.map(i => (
+                      <option key={i._id} value={i._id}>
+                        {getItemName(i)}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
