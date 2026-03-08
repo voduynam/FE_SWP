@@ -6,6 +6,7 @@ import {
   Navigate,
 } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import { EnrolledCoursesProvider } from './contexts/EnrolledCoursesContext';
 import { DeliveryProvider } from './contexts/DeliveryContext';
 import { Provider } from 'react-redux';
@@ -19,6 +20,7 @@ import Home from './pages/Home/Home';
 import Login from './pages/Auth/Login';
 import NotFound from './pages/NotFound/NotFound';
 import RoleDashboard from './pages/Roles/RoleDashboard';
+import AlertsDashboardPage from './pages/Roles/AlertsDashboardPage';
 // Admin pages
 import AdminUsersPage from './pages/Roles/AdminUsersPage';
 import AdminStoresPage from './pages/Roles/AdminStoresPage';
@@ -131,6 +133,9 @@ function AppContent() {
           <Route path='dashboard' element={<DriverDashboard />} />
           <Route path='delivery' element={<Delivery />} />
         </Route>
+
+        {/* Alerts dashboard – all roles */}
+        <Route path='alerts' element={<AlertsDashboardPage />} />
       </Route>
 
       <Route path='/login' element={<Login />} />
@@ -149,7 +154,9 @@ function App() {
         <AuthProvider>
           <DeliveryProvider>
             <EnrolledCoursesProvider>
-              <AppContent />
+              <NotificationProvider>
+                <AppContent />
+              </NotificationProvider>
             </EnrolledCoursesProvider>
           </DeliveryProvider>
         </AuthProvider>

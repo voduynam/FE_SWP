@@ -16,6 +16,7 @@ import {
   X,
   ChevronDown,
   Undo2,
+  AlertTriangle,
 } from "lucide-react";
 
 // Phân quyền menu theo yêu cầu:
@@ -135,6 +136,11 @@ const menuByRole = {
       path: "/app/admin/reports",
     },
     {
+      title: "Cảnh báo",
+      icon: AlertTriangle,
+      path: "/app/alerts",
+    },
+    {
       title: "Cài đặt hệ thống",
       icon: Settings,
       path: "/app/admin/settings",
@@ -173,6 +179,11 @@ const menuByRole = {
       icon: BarChart3,
       path: "/app/manager/reports",
     },
+    {
+      title: "Cảnh báo",
+      icon: AlertTriangle,
+      path: "/app/alerts",
+    },
   ],
 
   // Central Kitchen Staff – sản xuất & kho bếp trung tâm
@@ -202,6 +213,11 @@ const menuByRole = {
       icon: Warehouse,
       path: "/app/central/materials",
     },
+    {
+      title: "Cảnh báo",
+      icon: AlertTriangle,
+      path: "/app/alerts",
+    },
   ],
 
   // Supply Coordinator – điều phối cung ứng
@@ -225,6 +241,11 @@ const menuByRole = {
       title: "Xử lý sự cố",
       icon: Settings,
       path: "/app/supply/issues",
+    },
+    {
+      title: "Cảnh báo",
+      icon: AlertTriangle,
+      path: "/app/alerts",
     },
   ],
 
@@ -254,6 +275,11 @@ const menuByRole = {
       title: "Tồn kho cửa hàng",
       icon: Warehouse,
       path: "/app/store/inventory",
+    },
+    {
+      title: "Cảnh báo",
+      icon: AlertTriangle,
+      path: "/app/alerts",
     },
   ],
 
