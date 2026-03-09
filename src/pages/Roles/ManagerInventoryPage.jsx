@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCcw, Search, Package, ArrowUpDown, PlusCircle, History } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
@@ -64,6 +64,7 @@ export default function ManagerInventoryPage() {
   const [balances, setBalances] = useState([]);
   const [balPag, setBalPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [balSearch, setBalSearch] = useState('');
+  const [hideZero, setHideZero] = useState(true);
 
   // Transactions
   const [txns, setTxns] = useState([]);
@@ -82,6 +83,8 @@ export default function ManagerInventoryPage() {
   // Lookup data
   const [locations, setLocations] = useState([]);
   const [items, setItems] = useState([]);
+  const [adjustLots, setAdjustLots] = useState([]);
+  const adjustFromRowRef = useRef(false);
 
   useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 3000); return () => clearTimeout(t); } }, [success]);
 
@@ -131,14 +134,16 @@ export default function ManagerInventoryPage() {
   useEffect(() => { if (tab === 'transactions') loadTxns(1); }, [tab, txnTypeFilter]);
 
   const filteredBalances = useMemo(() => {
+    let list = balances;
+    if (hideZero) list = list.filter(r => (r.qty_on_hand ?? 0) !== 0);
     const s = (balSearch || '').toLowerCase();
-    if (!s) return balances;
-    return balances.filter(r => {
+    if (!s) return list;
+    return list.filter(r => {
       const name = getItemName(r.item_id).toLowerCase();
       const loc = getLocName(r.location_id).toLowerCase();
       return name.includes(s) || loc.includes(s);
     });
-  }, [balances, balSearch]);
+  }, [balances, balSearch, hideZero]);
 
   const filteredTxns = useMemo(() => {
     const s = (txnSearch || '').toLowerCase();
@@ -155,7 +160,10 @@ export default function ManagerInventoryPage() {
   useEffect(() => {
     if (!adjustOpen) return;
     setAdjustError('');
-    setAdjustForm({ location_id: '', item_id: '', lot_id: '', qty_adjustment: '', reason: '', adjustment_type: 'COUNT_ADJUSTMENT' });
+    if (!adjustFromRowRef.current) {
+      setAdjustForm({ location_id: '', item_id: '', lot_id: '', qty_adjustment: '', reason: '', adjustment_type: 'COUNT_ADJUSTMENT' });
+      setAdjustLots([]);
+    } else adjustFromRowRef.current = false;
     const load = async () => {
       const [locRes, itemRes] = await Promise.all([
         workflowService.getLocations({ limit: 200 }),
@@ -231,6 +239,11 @@ export default function ManagerInventoryPage() {
 
       {success && <div className='rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700'>{success}</div>}
       {error && <p className='text-sm text-red-600'>{error}</p>}
+      {tab === 'balances' && filteredBalances.some(r => (r.qty_on_hand ?? 0) < 0) && (
+        <div className='rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800'>
+          Có {filteredBalances.filter(r => (r.qty_on_hand ?? 0) < 0).length} dòng tồn âm. Vui lòng dùng <strong>Điều chỉnh</strong> để sửa.
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className='grid gap-4 sm:grid-cols-3'>
@@ -260,9 +273,15 @@ export default function ManagerInventoryPage() {
       {/* === Balances Tab === */}
       {tab === 'balances' && (
         <div className='space-y-3'>
-          <div className='relative'>
-            <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
-            <input value={balSearch} onChange={e => setBalSearch(e.target.value)} placeholder='Tìm theo sản phẩm / vị trí...' className='w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-orange-300 focus:ring-1 focus:ring-orange-300' />
+          <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+            <div className='relative flex-1'>
+              <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
+              <input value={balSearch} onChange={e => setBalSearch(e.target.value)} placeholder='Tìm theo sản phẩm / vị trí...' className='w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-orange-300 focus:ring-1 focus:ring-orange-300' />
+            </div>
+            <label className='flex items-center gap-2 text-sm text-slate-600 cursor-pointer'>
+              <input type='checkbox' checked={hideZero} onChange={e => setHideZero(e.target.checked)} className='rounded border-slate-300' />
+              Ẩn dòng tồn = 0
+            </label>
           </div>
 
           <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white'>
@@ -275,21 +294,48 @@ export default function ManagerInventoryPage() {
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Tồn kho</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Đặt trước</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Khả dụng</th>
+                  <th className='px-4 py-3 font-medium text-slate-600 text-right w-24'>Thao tác</th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100'>
-                {loading && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-                {!loading && !filteredBalances.length && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Không có dữ liệu</td></tr>}
-                {!loading && filteredBalances.map((r, idx) => (
-                  <tr key={r._id || idx} className='hover:bg-slate-50/50'>
-                    <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(r.item_id)}</td>
-                    <td className='px-4 py-3 text-slate-700'>{getLocName(r.location_id)}</td>
-                    <td className='px-4 py-3 text-slate-500 text-xs'>{getLotCode(r.lot_id)}</td>
-                    <td className='px-4 py-3 text-right font-medium'>{r.qty_on_hand ?? 0}</td>
-                    <td className='px-4 py-3 text-right text-slate-500'>{r.qty_reserved ?? 0}</td>
-                    <td className='px-4 py-3 text-right font-semibold text-emerald-600'>{r.qty_available ?? ((r.qty_on_hand ?? 0) - (r.qty_reserved ?? 0))}</td>
-                  </tr>
-                ))}
+                {loading && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
+                {!loading && !filteredBalances.length && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Không có dữ liệu</td></tr>}
+                {!loading && filteredBalances.map((r, idx) => {
+                  const qty = r.qty_on_hand ?? 0;
+                  const avail = r.qty_available ?? (qty - (r.qty_reserved ?? 0));
+                  const isNegative = qty < 0;
+                  const locId = r.location_id?._id ?? r.location_id;
+                  const itemId = r.item_id?._id ?? r.item_id;
+                  const lotId = r.lot_id?._id ?? r.lot_id ?? '';
+                  return (
+                    <tr key={r._id || idx} className={`hover:bg-slate-50/50 ${isNegative ? 'bg-red-50/50' : ''}`}>
+                      <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(r.item_id)}</td>
+                      <td className='px-4 py-3 text-slate-700'>{getLocName(r.location_id)}</td>
+                      <td className='px-4 py-3 text-slate-500 text-xs'>{getLotCode(r.lot_id)}</td>
+                      <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>{qty}</td>
+                      <td className='px-4 py-3 text-right text-slate-500'>{r.qty_reserved ?? 0}</td>
+                      <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{avail}</td>
+                      <td className='px-4 py-3 text-right'>
+                        <button
+                          type='button'
+                          onClick={async () => {
+                            adjustFromRowRef.current = true;
+                            setAdjustForm({ location_id: locId, item_id: itemId, lot_id: lotId, qty_adjustment: '', reason: '', adjustment_type: 'COUNT_ADJUSTMENT' });
+                            if (itemId) {
+                              const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
+                              const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
+                              setAdjustLots(list);
+                            } else setAdjustLots([]);
+                            setAdjustOpen(true);
+                          }}
+                          className='rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                        >
+                          Điều chỉnh
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -384,11 +430,41 @@ export default function ManagerInventoryPage() {
                 </div>
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Sản phẩm *</label>
-                  <select value={adjustForm.item_id} onChange={e => setAdjustForm(f => ({ ...f, item_id: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'>
+                  <select value={adjustForm.item_id} onChange={async e => {
+                    const v = e.target.value;
+                    setAdjustForm(f => ({ ...f, item_id: v, lot_id: '' }));
+                    if (v) {
+                      const res = await workflowService.getLots({ item_id: v, limit: 100 });
+                      const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
+                      setAdjustLots(list);
+                    } else setAdjustLots([]);
+                  }} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'>
                     <option value=''>-- Chọn sản phẩm --</option>
                     {items.map(i => <option key={i._id} value={i._id}>{i.name || i.sku || i._id}</option>)}
                   </select>
                 </div>
+                {adjustForm.item_id && (
+                  <div className={adjustLots.length > 0 ? '' : 'sm:col-span-2'}>
+                    {adjustLots.length > 0 ? (
+                      <>
+                        <label className='block text-sm font-medium text-slate-700'>Lô (tùy chọn)</label>
+                        <select value={adjustForm.lot_id} onChange={e => setAdjustForm(f => ({ ...f, lot_id: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'>
+                          <option value=''>-- Không có lô / Tồn chung --</option>
+                          {adjustLots.map(l => (
+                            <option key={l._id} value={l._id}>
+                              {l.lot_code || l._id}{l.exp_date ? ` (HSD: ${new Date(l.exp_date).toLocaleDateString('vi-VN')})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className='mt-0.5 text-xs text-slate-400'>Chọn lô hoặc để trống cho tồn chung</p>
+                      </>
+                    ) : (
+                      <p className='rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600'>
+                        Sản phẩm này không theo dõi theo lô. Điều chỉnh áp dụng cho tồn chung (lot_id = null).
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Loại điều chỉnh *</label>
                   <select value={adjustForm.adjustment_type} onChange={e => setAdjustForm(f => ({ ...f, adjustment_type: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'>

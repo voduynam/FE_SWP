@@ -28,6 +28,7 @@ import AdminReportsPage from './pages/Roles/AdminReportsPage';
 import ManagerProductsPage from './pages/Roles/ManagerProductsPage';
 import ManagerInventoryPage from './pages/Roles/ManagerInventoryPage';
 import ManagerReportsPage from './pages/Roles/ManagerReportsPage';
+import ManagerReturnRequestPage from './pages/Roles/ManagerReturnRequestPage';
 import RecipesPage from './pages/Roles/RecipesPage';
 // Franchise store pages
 import FranchiseOrdersPage from './pages/Roles/FranchiseOrdersPage';
@@ -37,15 +38,14 @@ import StoreReturnRequestPage from './pages/Roles/StoreReturnRequestPage';
 // Central kitchen pages
 import CentralOrdersPage from './pages/Roles/CentralOrdersPage';
 import CentralProductionPage from './pages/Roles/CentralProductionPage';
-import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
 import CentralShipmentsPage from './pages/Roles/CentralShipmentsPage';
-// Manager pages (returns)
-import ManagerReturnRequestPage from './pages/Roles/ManagerReturnRequestPage';
+import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
 // Supply coordinator pages
 import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
 import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
 import SupplyIssuesPage from './pages/Roles/SupplyIssuesPage';
 import DriverDashboard from './pages/Dashboards/DriverDashboard';
+import DriverShipmentsPage from './pages/Roles/DriverShipmentsPage';
 import Delivery from './pages/Delivery/Delivery';
 
 
@@ -129,6 +129,7 @@ function AppContent() {
         {/* Driver routes */}
         <Route path='driver'>
           <Route path='dashboard' element={<DriverDashboard />} />
+          <Route path='shipments' element={<DriverShipmentsPage />} />
           <Route path='delivery' element={<Delivery />} />
         </Route>
       </Route>

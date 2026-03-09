@@ -15,7 +15,7 @@ import {
   Menu,
   X,
   ChevronDown,
-  Undo2,
+  RotateCcw,
 } from "lucide-react";
 
 // Phân quyền menu theo yêu cầu:
@@ -149,6 +149,11 @@ const menuByRole = {
       path: "/app/manager/dashboard",
     },
     {
+      title: "Đơn hàng nội bộ",
+      icon: ClipboardList,
+      path: "/app/central/orders",
+    },
+    {
       title: "Sản phẩm & công thức",
       icon: Package,
       path: "/app/manager/products",
@@ -164,8 +169,8 @@ const menuByRole = {
       path: "/app/manager/inventory",
     },
     {
-      title: "Xử lý trả hàng",
-      icon: Undo2,
+      title: "Yêu cầu trả hàng",
+      icon: RotateCcw,
       path: "/app/manager/returns",
     },
     {
@@ -188,12 +193,12 @@ const menuByRole = {
       path: "/app/central/orders",
     },
     {
-      title: "Sản xuất",
-      icon: ChefHat,
+      title: "Sản xuất & xuất kho",
+      icon: TruckIcon,
       path: "/app/central/production",
     },
     {
-      title: "Giao hàng",
+      title: "Phiếu giao hàng",
       icon: TruckIcon,
       path: "/app/central/shipments",
     },
@@ -247,7 +252,7 @@ const menuByRole = {
     },
     {
       title: "Trả hàng",
-      icon: Undo2,
+      icon: RotateCcw,
       path: "/app/store/returns",
     },
     {
@@ -263,6 +268,11 @@ const menuByRole = {
       title: "Dashboard",
       icon: LayoutDashboard,
       path: "/app/driver/dashboard",
+    },
+    {
+      title: "Lô giao hàng",
+      icon: Package,
+      path: "/app/driver/shipments",
     },
     {
       title: "Vận chuyển",

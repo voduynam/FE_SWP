@@ -16,7 +16,7 @@ const statusLabels = {
 
 export default function CentralOrdersPage() {
   const [orders, setOrders] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('SUBMITTED');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
@@ -127,10 +127,13 @@ export default function CentralOrdersPage() {
             className='input-field min-w-[160px]'
           >
             <option value='ALL'>Tất cả</option>
-            <option value='SUBMITTED'>Đã gửi </option>
+            <option value='DRAFT'>Nháp</option>
+            <option value='SUBMITTED'>Đã gửi</option>
             <option value='APPROVED'>Đã phê duyệt</option>
             <option value='PROCESSING'>Đang xử lý</option>
             <option value='SHIPPED'>Đã giao</option>
+            <option value='RECEIVED'>Đã nhận</option>
+            <option value='CANCELLED'>Đã hủy</option>
           </select>
           <button
             onClick={loadOrders}
@@ -176,8 +179,11 @@ export default function CentralOrdersPage() {
             )}
             {!loading && !filteredOrders.length && (
               <tr>
-                <td colSpan={7} className='px-4 py-6 text-center text-slate-400'>
-                  Không có đơn nào.
+                <td colSpan={7} className='px-4 py-6 text-center'>
+                  <p className='text-slate-400'>Không có đơn nào.</p>
+                  <p className='mt-1 text-xs text-slate-400'>
+                    Thử chọn trạng thái khác hoặc liên hệ Admin nếu bạn là NV Bếp trung tâm.
+                  </p>
                 </td>
               </tr>
             )}

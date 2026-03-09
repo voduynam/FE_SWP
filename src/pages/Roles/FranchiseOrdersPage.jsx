@@ -126,6 +126,13 @@ export default function FranchiseOrdersPage() {
     });
   }, [orders, search]);
 
+  const DISCRETE_UOMS = ['PACK', 'CARTON', 'UNIT'];
+  const isDiscreteUom = (itemId) => {
+    const it = items.find(i => i._id === itemId);
+    const code = (it?.base_uom_id?.code || '').toUpperCase();
+    return DISCRETE_UOMS.includes(code);
+  };
+
   const handleLineChange = (idx, field, value) => {
     setNewOrder(prev => {
       const lines = [...prev.lines];
@@ -137,7 +144,13 @@ export default function FranchiseOrdersPage() {
         if (it) {
           lines[idx].uom_id = it.base_uom_id?._id || '';
           lines[idx].unit_price = it.base_sell_price ?? it.cost_price ?? 0;
+          if (DISCRETE_UOMS.includes((it.base_uom_id?.code || '').toUpperCase())) {
+            lines[idx].qty_ordered = Math.max(1, Math.round(lines[idx].qty_ordered));
+          }
         }
+      }
+      if (field === 'qty_ordered' && isDiscreteUom(lines[idx].item_id)) {
+        lines[idx].qty_ordered = Math.max(1, Math.round(v));
       }
       return { ...prev, lines };
     });
@@ -162,12 +175,17 @@ export default function FranchiseOrdersPage() {
       .filter(l => l.item_id && (l.qty_ordered || 0) > 0)
       .map(l => ({
         item_id: l.item_id,
-        qty_ordered: Number(l.qty_ordered) || 0,
+        qty_ordered: isDiscreteUom(l.item_id) ? Math.round(Number(l.qty_ordered) || 0) : Number(l.qty_ordered) || 0,
         uom_id: l.uom_id,
         unit_price: Math.max(0, Number(l.unit_price) || 0),
       }));
     if (lines.length === 0) return { error: 'Vui lòng chọn ít nhất 1 sản phẩm với số lượng > 0.', body: null };
     if (lines.some(l => l.qty_ordered <= 0)) return { error: 'Số lượng đặt hàng phải lớn hơn 0.', body: null };
+    const badDiscrete = newOrder.lines.find(l => l.item_id && isDiscreteUom(l.item_id) && !Number.isInteger(Number(l.qty_ordered)));
+    if (badDiscrete) {
+      const it = items.find(i => i._id === badDiscrete.item_id);
+      return { error: `"${it?.name || badDiscrete.item_id}" đơn vị ${it?.base_uom_id?.code || ''} phải là số nguyên.`, body: null };
+    }
     // order_date từ datetime-local dạng "yyyy-MM-ddThh:mm" (giờ local) → parse local rồi gửi ISO
     const orderDateISO = newOrder.order_date
       ? new Date(newOrder.order_date).toISOString()
@@ -616,11 +634,12 @@ export default function FranchiseOrdersPage() {
                       <label className='block text-xs font-medium text-slate-600'>Số lượng</label>
                       <input
                         type='number'
-                        min={0.01}
-                        step={0.01}
+                        min={isDiscreteUom(line.item_id) ? 1 : 0.01}
+                        step={isDiscreteUom(line.item_id) ? 1 : 0.01}
                         value={line.qty_ordered}
+                        disabled={!line.item_id}
                         onChange={e => handleLineChange(idx, 'qty_ordered', e.target.value)}
-                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm'
+                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed'
                       />
                     </div>
                     <div className='sm:col-span-2'>
@@ -637,8 +656,9 @@ export default function FranchiseOrdersPage() {
                         type='number'
                         min={0}
                         value={line.unit_price}
+                        disabled={!line.item_id}
                         onChange={e => handleLineChange(idx, 'unit_price', e.target.value)}
-                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm'
+                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed'
                       />
                     </div>
                     <div className='flex items-center justify-end sm:col-span-1'>

@@ -82,7 +82,11 @@ export default function StoreReturnRequestPage() {
         ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
       });
       if (res.success && res.data) {
-        const list = Array.isArray(res.data.data) ? res.data.data : [];
+        const list = Array.isArray(res.data.data)
+          ? res.data.data
+          : Array.isArray(res.data)
+            ? res.data
+            : [];
         setReturns(list);
         const p = res.data.pagination ?? {};
         setPagination({ page: p.page ?? page, limit: p.limit ?? PAGE_SIZE, total: p.total ?? 0, pages: p.pages ?? 1 });
@@ -158,16 +162,40 @@ export default function StoreReturnRequestPage() {
     load();
   }, [createOpen]);
 
-  /* ─── When receipt selected → load detail + items for uom_id ─── */
+  /* ─── When receipt selected → load detail + items + store_org_unit_id from shipment ─── */
   useEffect(() => {
-    if (!selectedReceiptId) { setReceiptDetail(null); setReturnLines([]); return; }
+    if (!selectedReceiptId) {
+      setReceiptDetail(null);
+      setReturnLines([]);
+      return;
+    }
     let cancelled = false;
     setReceiptLoading(true);
     workflowService.getGoodsReceipt(selectedReceiptId).then(async res => {
       if (cancelled) return;
-      if (!res.success || !res.data) { setReceiptLoading(false); setReceiptDetail(null); setReturnLines([]); return; }
+      if (!res.success || !res.data) {
+        setReceiptLoading(false);
+        setReceiptDetail(null);
+        setReturnLines([]);
+        return;
+      }
       const receipt = res.data;
       setReceiptDetail(receipt);
+
+      // Lấy lot_id từ shipment (trùng với lúc confirm goods receipt) để process return tìm đúng tồn kho
+      const shipmentId = receipt.shipment_id?._id || receipt.shipment_id;
+      const shipmentLineToLot = {};
+      if (shipmentId) {
+        const shipRes = await workflowService.getShipment(shipmentId);
+        if (!cancelled && shipRes.success && shipRes.data?.lines) {
+          for (const sl of shipRes.data.lines) {
+            const slId = sl._id;
+            const firstLot = Array.isArray(sl.lots) && sl.lots[0];
+            const lotId = firstLot?.lot_id?._id || firstLot?.lot_id || null;
+            if (slId) shipmentLineToLot[slId] = lotId;
+          }
+        }
+      }
 
       const itemIds = [...new Set((receipt.lines || []).map(l => l.item_id?._id || l.item_id).filter(Boolean))];
       let itemMap = {};
@@ -181,13 +209,15 @@ export default function StoreReturnRequestPage() {
         const itemId = l.item_id?._id || l.item_id;
         const item = itemMap[itemId] || l.item_id || {};
         const uomId = l.uom_id?._id || l.uom_id || item.base_uom_id?._id || item.base_uom_id || '';
+        const shipmentLineId = l.shipment_line_id?._id || l.shipment_line_id;
+        const lotId = shipmentLineToLot[shipmentLineId] || l.lot_id?._id || l.lot_id || '';
         return {
           source_receipt_line_id: l._id,
           item_id: itemId,
           item_name: item.name || item.sku || l.item_id?.name || l.item_id?.sku || itemId || '-',
           uom_id: uomId,
           uom_name: item.base_uom_id?.code || item.base_uom_id?.name || l.uom_id?.code || '',
-          lot_id: l.lot_id?._id || l.lot_id || '',
+          lot_id: lotId,
           lot_code: l.lot_id?.lot_code || '',
           qty_received: l.qty_received || 0,
           qty_return: 0,
@@ -242,11 +272,19 @@ export default function StoreReturnRequestPage() {
         return;
       }
 
+      const missingUom = linesToSend.find(l => !l.uom_id);
+      if (missingUom) {
+        setCreateError('Một số sản phẩm thiếu đơn vị tính. Vui lòng kiểm tra dữ liệu phiếu nhận hàng.');
+        setCreating(false);
+        return;
+      }
+
       const payload = {
         goods_receipt_id: selectedReceiptId,
         return_date: returnDate || new Date().toISOString(),
         reason: reason || '',
         lines: linesToSend,
+        // Không gửi store_org_unit_id - để BE dùng req.user.org_unit_id, đảm bảo user thấy return mới trong danh sách
       };
 
       const res = await workflowService.createReturnRequest(payload);
@@ -257,7 +295,7 @@ export default function StoreReturnRequestPage() {
       }
       setCreateOpen(false);
       setSuccess('Đã tạo yêu cầu trả hàng (PENDING). Vui lòng chờ phê duyệt.');
-      loadReturns(1);
+      await loadReturns(1);
     } catch (err) {
       setCreateError(err?.response?.data?.message || 'Có lỗi khi tạo yêu cầu');
     } finally {

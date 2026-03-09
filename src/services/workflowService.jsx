@@ -17,7 +17,10 @@ const withResult = async request => {
     return {
       success: false,
       data: null,
-      message: error?.response?.data?.message || 'API request failed',
+      message:
+        error?.response?.data?.message ||
+        error?.response?.data?.error ||
+        (error?.response?.status ? `Lỗi server (${error.response.status})` : 'Không thể kết nối tới server'),
       error,
     };
   }
@@ -110,31 +113,36 @@ export const workflowService = {
 
   getLots: params =>
     withResult(() => axiosInstance.get('/lots', { params })),
+  createLot: payload =>
+    withResult(() => axiosInstance.post('/lots', payload)),
+  updateLot: (id, payload) =>
+    withResult(() => axiosInstance.put(`/lots/${id}`, payload)),
 
   // Shipments & logistics
   getShipments: params =>
     withResult(() => axiosInstance.get('/shipments', { params })),
+  getShipment: id =>
+    withResult(() => axiosInstance.get(`/shipments/${id}`)),
+  createShipment: payload =>
+    withResult(() => axiosInstance.post('/shipments', payload)),
+  updateShipmentStatus: (id, status) =>
+    withResult(() => axiosInstance.put(`/shipments/${id}/status`, { status })),
+  dispatchShipment: id =>
+    withResult(() => axiosInstance.put(`/shipments/${id}/dispatch`)),
   getShipmentsPaginated: async params => {
     try {
       const response = await axiosInstance.get('/shipments', { params });
       const payload = response?.data ?? {};
       return { success: true, data: payload, message: payload.message || '' };
     } catch (error) {
-      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
     }
   },
-  getShipment: id =>
-    withResult(() => axiosInstance.get(`/shipments/${id}`)),
-  getShipmentsByOrder: orderId =>
-    withResult(() => axiosInstance.get(`/shipments/by-order/${orderId}`)),
-  createShipment: payload =>
-    withResult(() => axiosInstance.post('/shipments', payload)),
-  updateShipment: (id, payload) =>
-    withResult(() => axiosInstance.put(`/shipments/${id}`, payload)),
-  updateShipmentStatus: (id, status) =>
-    withResult(() => axiosInstance.put(`/shipments/${id}/status`, { status })),
-  dispatchShipment: id =>
-    withResult(() => axiosInstance.put(`/shipments/${id}/dispatch`)),
   getGoodsReceipts: params =>
     withResult(() => axiosInstance.get('/goods-receipts', { params })),
   /** Returns full BE response: { success, data: { data: [], pagination: { page, limit, total, pages } } } */
@@ -162,10 +170,8 @@ export const workflowService = {
     withResult(() => axiosInstance.post('/goods-receipts', payload)),
   confirmGoodsReceipt: (id, payload = { status: 'RECEIVED' }) =>
     withResult(() => axiosInstance.put(`/goods-receipts/${id}/confirm`, payload)),
-  getDeliveryRoutes: params =>
-    withResult(() => axiosInstance.get('/delivery-routes', { params })),
 
-  // Return requests – Flow 5
+  // Return requests – Flow 5: Trả hàng
   getReturnRequests: params =>
     withResult(() => axiosInstance.get('/return-requests', { params })),
   getReturnRequestsPaginated: async params => {
@@ -174,13 +180,16 @@ export const workflowService = {
       const payload = response?.data ?? {};
       return { success: true, data: payload, message: payload.message || '' };
     } catch (error) {
-      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
     }
   },
   getReturnRequest: id =>
     withResult(() => axiosInstance.get(`/return-requests/${id}`)),
-  getReturnRequestsByStore: storeId =>
-    withResult(() => axiosInstance.get(`/return-requests/by-store/${storeId}`)),
   createReturnRequest: payload =>
     withResult(() => axiosInstance.post('/return-requests', payload)),
   updateReturnRequestStatus: (id, payload) =>
@@ -188,54 +197,20 @@ export const workflowService = {
   processReturnRequest: id =>
     withResult(() => axiosInstance.put(`/return-requests/${id}/process`)),
 
-  // Supply coordination – Flow 7
+  getDeliveryRoutes: params =>
+    withResult(() => axiosInstance.get('/delivery-routes', { params })),
+
+  // Supply coordination
   getConsolidatedOrders: params =>
     withResult(() => axiosInstance.get('/consolidated-orders', { params })),
-  getConsolidatedOrder: id =>
-    withResult(() => axiosInstance.get(`/consolidated-orders/${id}`)),
-  getConsolidatedByDate: date =>
-    withResult(() => axiosInstance.get(`/consolidated-orders/by-date/${date}`)),
   generateConsolidatedOrders: payload =>
     withResult(() => axiosInstance.post('/consolidated-orders/generate', payload)),
-
-  getDeliveryRoute: id =>
-    withResult(() => axiosInstance.get(`/delivery-routes/${id}`)),
-  createDeliveryRoute: payload =>
-    withResult(() => axiosInstance.post('/delivery-routes', payload)),
-  updateDeliveryRoute: (id, payload) =>
-    withResult(() => axiosInstance.put(`/delivery-routes/${id}`, payload)),
-  startDeliveryRoute: (id, payload) =>
-    withResult(() => axiosInstance.put(`/delivery-routes/${id}/start`, payload)),
-  completeDeliveryRoute: (id, payload) =>
-    withResult(() => axiosInstance.put(`/delivery-routes/${id}/complete`, payload)),
-  updateRouteStatus: (id, payload) =>
-    withResult(() => axiosInstance.put(`/delivery-routes/${id}/status`, payload)),
-  addRouteStop: (routeId, payload) =>
-    withResult(() => axiosInstance.post(`/delivery-routes/${routeId}/stops`, payload)),
-  updateRouteStop: (routeId, stopId, payload) =>
-    withResult(() => axiosInstance.put(`/delivery-routes/${routeId}/stops/${stopId}`, payload)),
-  updateStopStatus: (routeId, stopId, payload) =>
-    withResult(() => axiosInstance.put(`/delivery-routes/${routeId}/stops/${stopId}/status`, payload)),
-
-  getException: id =>
-    withResult(() => axiosInstance.get(`/exceptions/${id}`)),
   getExceptions: params =>
     withResult(() => axiosInstance.get('/exceptions', { params })),
-  createException: payload =>
-    withResult(() => axiosInstance.post('/exceptions', payload)),
   resolveException: (id, payload) =>
     withResult(() => axiosInstance.put(`/exceptions/${id}/resolve`, payload)),
 
-  getDeliveryPerformance: params =>
-    withResult(() => axiosInstance.get('/performance-metrics/delivery-performance', { params })),
-  getOrderFulfillment: params =>
-    withResult(() => axiosInstance.get('/performance-metrics/order-fulfillment', { params })),
-  getExceptionHandling: params =>
-    withResult(() => axiosInstance.get('/performance-metrics/exception-handling', { params })),
-  getProductionEfficiency: params =>
-    withResult(() => axiosInstance.get('/performance-metrics/production-efficiency', { params })),
-
-  // Inventory – Flow 6
+  // Inventory + alerts
   getInventoryBalances: params =>
     withResult(() => axiosInstance.get('/inventory/balances', { params })),
   getInventoryBalancesPaginated: async params => {
@@ -244,42 +219,34 @@ export const workflowService = {
       const payload = response?.data ?? {};
       return { success: true, data: payload, message: payload.message || '' };
     } catch (error) {
-      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
     }
   },
-  getInventoryByLocation: (locationId, params) =>
-    withResult(() => axiosInstance.get(`/inventory/by-location/${locationId}`, { params })),
-  getInventoryByItem: (itemId, params) =>
-    withResult(() => axiosInstance.get(`/inventory/by-item/${itemId}`, { params })),
   getInventoryTransactions: async params => {
     try {
       const response = await axiosInstance.get('/inventory/transactions', { params });
       const payload = response?.data ?? {};
       return { success: true, data: payload, message: payload.message || '' };
     } catch (error) {
-      return { success: false, data: null, message: error?.response?.data?.message || 'API request failed', error };
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
     }
   },
   getInventorySummary: params =>
     withResult(() => axiosInstance.get('/inventory/summary', { params })),
-  getInventoryExpiring: params =>
-    withResult(() => axiosInstance.get('/inventory/expiring', { params })),
   adjustInventory: payload =>
     withResult(() => axiosInstance.post('/inventory/adjust', payload)),
-
-  // Lot management
-  getLot: id =>
-    withResult(() => axiosInstance.get(`/lots/${id}`)),
-  getLotsByItem: (itemId, params) =>
-    withResult(() => axiosInstance.get(`/lots/by-item/${itemId}`, { params })),
-  getExpiringLots: params =>
-    withResult(() => axiosInstance.get('/lots/expiring', { params })),
-  createLot: payload =>
-    withResult(() => axiosInstance.post('/lots', payload)),
-  updateLot: (id, payload) =>
-    withResult(() => axiosInstance.put(`/lots/${id}`, payload)),
-
-  // Alerts
+  getInventoryExpiring: params =>
+    withResult(() => axiosInstance.get('/inventory/expiring', { params })),
   getAlertsSummary: params =>
     withResult(() => axiosInstance.get('/alerts/summary', { params })),
   getAlertsLowStock: params =>
@@ -298,10 +265,12 @@ export const workflowService = {
   getUsers: params => withResult(() => axiosInstance.get('/users', { params })),
   getOrgUnits: params =>
     withResult(() => axiosInstance.get('/master-data/org-units', { params })),
-  getCategories: params =>
-    withResult(() => axiosInstance.get('/master-data/categories', { params })),
   getLocations: params =>
     withResult(() => axiosInstance.get('/master-data/locations', { params })),
+  getLocation: id =>
+    withResult(() => axiosInstance.get(`/master-data/locations/${id}`)),
+  getCategories: params =>
+    withResult(() => axiosInstance.get('/master-data/categories', { params })),
   getRoles: params =>
     withResult(() => axiosInstance.get('/master-data/roles', { params })),
   registerUser: payload =>

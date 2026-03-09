@@ -40,3 +40,9 @@ remix-of-kitchen-hub/
 # Build outputs
 dist/
 build/
+
+# Personal test docs & scripts (không push)
+FLOW*_CHECK.md
+FLOW*_ISSUES.md
+FLOW*_TEST_SCENARIO.md
+scripts/

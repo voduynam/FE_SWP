@@ -27,7 +27,8 @@ function getShipmentList(res) {
   if (!res?.success) return [];
   if (Array.isArray(res.data)) return res.data;
   if (Array.isArray(res.data?.data)) return res.data.data;
-  return [];
+  const paginated = res?.data?.data ?? res?.data;
+  return Array.isArray(paginated) ? paginated : [];
 }
 
 const PAGE_SIZE = 10;
@@ -46,6 +47,7 @@ export default function GoodsReceiptPage() {
   const [detailId, setDetailId] = useState(null);
   const [detailReceipt, setDetailReceipt] = useState(null);
   const [detailError, setDetailError] = useState(null);
+  const [confirmError, setConfirmError] = useState('');
   const [confirmingId, setConfirmingId] = useState(null);
 
   // Create form: selected shipment & lines
@@ -57,9 +59,9 @@ export default function GoodsReceiptPage() {
     new Date().toISOString().slice(0, 16)
   );
 
-  const loadReceipts = async (page = 1) => {
+  const loadReceipts = async (page = 1, keepSuccess = false) => {
     setLoading(true);
-    setSuccess('');
+    if (!keepSuccess) setSuccess('');
     try {
       const res = await workflowService.getGoodsReceiptsPaginated({
         page,
@@ -86,13 +88,18 @@ export default function GoodsReceiptPage() {
     }
   };
 
+  const [shipmentLoadInfo, setShipmentLoadInfo] = useState(null); // { shipped, inTransit, delivered, afterFilter }
   const loadShipmentsForCreate = async () => {
-    const [shippedRes, inTransitRes, receiptsRes] = await Promise.all([
+    const [shippedRes, inTransitRes, deliveredRes, receiptsRes] = await Promise.all([
       workflowService.getShipments({ status: 'SHIPPED', limit: 100 }),
       workflowService.getShipments({ status: 'IN_TRANSIT', limit: 100 }),
+      workflowService.getShipments({ status: 'DELIVERED', limit: 100 }),
       workflowService.getGoodsReceipts({ limit: 500 }),
     ]);
-    let list = [...getShipmentList(shippedRes), ...getShipmentList(inTransitRes)];
+    const shippedList = getShipmentList(shippedRes);
+    const inTransitList = getShipmentList(inTransitRes);
+    const deliveredList = getShipmentList(deliveredRes);
+    let list = [...shippedList, ...inTransitList, ...deliveredList];
     const existingShipmentIds = new Set(
       (getReceiptList(receiptsRes) || [])
         .map(r => r.shipment_id?._id ?? r.shipment_id)
@@ -100,6 +107,12 @@ export default function GoodsReceiptPage() {
     );
     list = list.filter(s => !existingShipmentIds.has(s._id));
     setShipments(list);
+    setShipmentLoadInfo({
+      shipped: shippedList.length,
+      inTransit: inTransitList.length,
+      delivered: deliveredList.length,
+      afterFilter: list.length,
+    });
   };
 
   useEffect(() => {
@@ -146,6 +159,7 @@ export default function GoodsReceiptPage() {
     setDetailId(id);
     setDetailReceipt(null);
     setDetailError(null);
+    setConfirmError('');
     if (!id) return;
     const res = await workflowService.getGoodsReceipt(id);
     if (res.success && res.data) {
@@ -226,7 +240,7 @@ export default function GoodsReceiptPage() {
       setSelectedShipmentId('');
       setShipmentDetail(null);
       setLines([]);
-      setSuccess('Đã tạo phiếu nhận hàng (DRAFT).');
+      setSuccess('Đã tạo phiếu nhận hàng (DRAFT). Vui lòng bấm "Chi tiết" → "Xác nhận nhận hàng" để cập nhật tồn kho.');
       await loadReceipts(1);
     } catch (err) {
       console.error(err);
@@ -239,21 +253,22 @@ export default function GoodsReceiptPage() {
   const handleConfirm = async receipt => {
     setConfirmingId(receipt._id);
     setSuccess('');
+    setConfirmError('');
     try {
       const res = await workflowService.confirmGoodsReceipt(receipt._id, {
         status: 'RECEIVED',
       });
       if (res.success) {
+        setConfirmError('');
         setSuccess(`Đã xác nhận nhận hàng: ${receipt.receipt_no || receipt._id}. Tồn kho đã cập nhật.`);
         setDetailReceipt(prev => (prev?._id === receipt._id ? { ...prev, status: 'RECEIVED' } : prev));
-        await loadReceipts(pagination.page);
+        await loadReceipts(pagination.page, true);
       } else {
-        setSuccess('');
-        alert(res.message || 'Xác nhận thất bại');
+        setConfirmError(res.message || 'Xác nhận thất bại');
       }
     } catch (err) {
       console.error(err);
-      alert(err?.response?.data?.message || 'Xác nhận thất bại');
+      setConfirmError(err?.response?.data?.message || 'Xác nhận thất bại');
     } finally {
       setConfirmingId(null);
     }
@@ -274,6 +289,17 @@ export default function GoodsReceiptPage() {
           <button
             onClick={() => setSuccess('')}
             className='text-xs text-emerald-700/70 hover:text-emerald-900'
+          >
+            Đóng
+          </button>
+        </div>
+      )}
+      {confirmError && (
+        <div className='flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700'>
+          <span>{confirmError}</span>
+          <button
+            onClick={() => setConfirmError('')}
+            className='text-xs text-red-700/70 hover:text-red-900'
           >
             Đóng
           </button>
@@ -444,7 +470,7 @@ export default function GoodsReceiptPage() {
       {detailId && createPortal(
         <div
           className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4'
-          onClick={() => setDetailId(null)}
+          onClick={() => { setDetailId(null); setConfirmError(''); }}
         >
           <div
             className='w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
@@ -455,7 +481,7 @@ export default function GoodsReceiptPage() {
                 Chi tiết phiếu nhận hàng
               </h2>
               <button
-                onClick={() => setDetailId(null)}
+                onClick={() => { setDetailId(null); setConfirmError(''); }}
                 className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'
               >
                 ×
@@ -504,6 +530,9 @@ export default function GoodsReceiptPage() {
                     </tbody>
                   </table>
                 </div>
+                {confirmError && (
+                  <p className='rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700'>{confirmError}</p>
+                )}
                 {detailReceipt.status === 'DRAFT' && (
                   <div className='flex justify-end border-t pt-4'>
                     <button
@@ -526,7 +555,7 @@ export default function GoodsReceiptPage() {
       {createOpen && createPortal(
         <div
           className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4'
-          onClick={() => !creating && setCreateOpen(false)}
+          onClick={() => { if (!creating) { setCreateOpen(false); setShipmentLoadInfo(null); } }}
         >
           <div
             className='w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
@@ -537,20 +566,30 @@ export default function GoodsReceiptPage() {
                 Tạo phiếu nhận hàng
               </h2>
               <button
-                onClick={() => !creating && setCreateOpen(false)}
+                onClick={() => { if (!creating) { setCreateOpen(false); setShipmentLoadInfo(null); } }}
                 className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'
               >
                 ×
               </button>
             </div>
+            {shipmentLoadInfo && shipments.length === 0 && (
+              <div className='mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800'>
+                <p className='font-medium'>Không có lô giao hàng để tạo phiếu nhận.</p>
+                <p className='mt-1'>API: SHIPPED={shipmentLoadInfo.shipped}, IN_TRANSIT={shipmentLoadInfo.inTransit}, DELIVERED={shipmentLoadInfo.delivered} → sau lọc: {shipmentLoadInfo.afterFilter} lô.</p>
+                <p className='mt-1 text-amber-600'>Kiểm tra: 1) Driver đã cập nhật trạng thái? 2) Đã tạo phiếu cho lô này? 3) Lô DELIVERED bị từ chối → sửa BE (FLOW3_CHECK.md).</p>
+              </div>
+            )}
             {createError && (
-              <p className='mb-3 text-sm text-red-600'>{createError}</p>
+              <p className='mb-3 text-sm text-red-600'>
+                {createError}
+                {(createError.includes('shipped') || createError.includes('transit')) && ' Nếu lô đã DELIVERED, cần sửa BE (xem FLOW3_CHECK.md).'}
+              </p>
             )}
 
             <form onSubmit={submitCreate} className='space-y-4'>
               <div>
                 <label className='block text-sm font-medium text-slate-700'>
-                  Chọn lô giao hàng (đã giao / đang vận chuyển)
+                  Chọn lô giao hàng (SHIPPED / IN_TRANSIT / DELIVERED)
                 </label>
                 <select
                   value={selectedShipmentId}
@@ -615,6 +654,7 @@ export default function GoodsReceiptPage() {
                               type='number'
                               min={0}
                               max={line.qty_ship}
+                              step='any'
                               value={line.qty_received}
                               onChange={e =>
                                 handleLineChange(idx, 'qty_received', e.target.value)
@@ -627,6 +667,7 @@ export default function GoodsReceiptPage() {
                               type='number'
                               min={0}
                               max={line.qty_ship}
+                              step='any'
                               value={line.qty_rejected}
                               onChange={e =>
                                 handleLineChange(idx, 'qty_rejected', e.target.value)
@@ -648,7 +689,7 @@ export default function GoodsReceiptPage() {
                 <button
                   type='button'
                   disabled={creating}
-                  onClick={() => setCreateOpen(false)}
+                  onClick={() => { setCreateOpen(false); setShipmentLoadInfo(null); }}
                   className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
                 >
                   Hủy

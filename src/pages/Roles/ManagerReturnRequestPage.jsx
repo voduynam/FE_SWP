@@ -54,6 +54,9 @@ export default function ManagerReturnRequestPage() {
   // Reject modal
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNotes, setRejectNotes] = useState('');
+  const [processError, setProcessError] = useState('');
+  const [inventoryCheck, setInventoryCheck] = useState(null);
+  const [inventoryCheckLoading, setInventoryCheckLoading] = useState(false);
 
   /* ─── Load list ─── */
   const loadReturns = async (page = 1) => {
@@ -87,6 +90,8 @@ export default function ManagerReturnRequestPage() {
     setDetailId(id);
     setDetailReturn(null);
     setDetailError(null);
+    setProcessError('');
+    setInventoryCheck(null);
     setRejectOpen(false);
     setRejectNotes('');
     if (!id) return;
@@ -151,15 +156,28 @@ export default function ManagerReturnRequestPage() {
   const handleProcess = async ret => {
     setActionLoadingId(ret._id);
     setSuccess('');
+    setProcessError('');
     try {
       const res = await workflowService.processReturnRequest(ret._id);
       if (res.success) {
         setSuccess(`Đã xử lý hoàn thành. Tồn kho cửa hàng đã được trừ.`);
         await loadDetail(ret._id);
         loadReturns(pagination.page);
-      } else alert(res.message || 'Xử lý thất bại');
+      } else {
+        const msg = String(res.message || 'Xử lý thất bại');
+        const friendly =
+          msg.toLowerCase().includes('inventory balance not found') || msg.toLowerCase().includes('balance not found')
+            ? 'Không tìm thấy tồn kho tại cửa hàng. Có thể phiếu nhận hàng chưa được xác nhận, hoặc cửa hàng không đúng. Vui lòng kiểm tra phiếu nhận hàng đã xác nhận và tồn kho cửa hàng.'
+            : msg;
+        setProcessError(friendly);
+      }
     } catch (err) {
-      alert(err?.response?.data?.message || 'Xử lý thất bại');
+      const msg = String(err?.response?.data?.message || err?.message || 'Xử lý thất bại');
+      const friendly =
+        msg.toLowerCase().includes('inventory balance not found') || msg.toLowerCase().includes('balance not found')
+          ? 'Không tìm thấy tồn kho tại cửa hàng. Có thể phiếu nhận hàng chưa được xác nhận, hoặc cửa hàng không đúng. Vui lòng kiểm tra phiếu nhận hàng đã xác nhận và tồn kho cửa hàng.'
+          : msg;
+      setProcessError(friendly);
     } finally {
       setActionLoadingId(null);
     }
@@ -196,6 +214,41 @@ export default function ManagerReturnRequestPage() {
     if (!obj) return '-';
     if (typeof obj === 'object') return obj.name || obj.sku || obj._id;
     return obj;
+  };
+
+  const handleCheckInventory = async ret => {
+    const storeOrgId = ret.store_org_unit_id?._id || ret.store_org_unit_id;
+    if (!storeOrgId) return;
+    setInventoryCheckLoading(true);
+    setInventoryCheck(null);
+    try {
+      const locRes = await workflowService.getLocations({ org_unit_id: storeOrgId, limit: 20 });
+      const locs = Array.isArray(locRes?.data) ? locRes.data : locRes?.data?.data ?? [];
+      const locIds = locs.map(l => l._id).filter(Boolean);
+      if (!locIds.length) {
+        setInventoryCheck({ error: 'Không tìm thấy vị trí kho của cửa hàng.' });
+        return;
+      }
+      const itemIds = [...new Set((ret.lines || []).map(l => l.item_id?._id || l.item_id).filter(Boolean))];
+      const balRes = await workflowService.getInventoryBalances({
+        location_id: locIds[0],
+        limit: 100,
+      });
+      const raw = balRes?.data;
+      const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
+      const relevant = itemIds.length
+        ? list.filter(b => itemIds.includes(b.item_id?._id || b.item_id))
+        : list;
+      setInventoryCheck({
+        locations: locs,
+        balances: relevant,
+        allBalances: list,
+      });
+    } catch (e) {
+      setInventoryCheck({ error: e?.message || 'Không thể tải tồn kho.' });
+    } finally {
+      setInventoryCheckLoading(false);
+    }
   };
 
   const pendingCount = returns.filter(r => r.status === 'PENDING').length;
@@ -370,6 +423,54 @@ export default function ManagerReturnRequestPage() {
                   </table>
                 </div>
 
+                {processError && (
+                  <div className='space-y-2'>
+                    <div className='rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>
+                      {processError}
+                    </div>
+                    <button
+                      type='button'
+                      disabled={inventoryCheckLoading}
+                      onClick={() => handleCheckInventory(detailReturn)}
+                      className='rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50'
+                    >
+                      {inventoryCheckLoading ? 'Đang tải...' : 'Kiểm tra tồn kho cửa hàng'}
+                    </button>
+                    {inventoryCheck && (
+                      <div className='rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm'>
+                        {inventoryCheck.error ? (
+                          <p className='text-red-600'>{inventoryCheck.error}</p>
+                        ) : (
+                          <>
+                            <p className='mb-2 font-medium text-slate-700'>Tồn kho tại cửa hàng (sản phẩm trong yêu cầu):</p>
+                            {inventoryCheck.balances?.length === 0 ? (
+                              <p className='text-amber-600'>Không có tồn kho. Phiếu nhận hàng có thể chưa được xác nhận.</p>
+                            ) : (
+                              <table className='w-full text-xs'>
+                                <thead>
+                                  <tr className='text-left text-slate-500'>
+                                    <th className='py-1 pr-2'>Sản phẩm</th>
+                                    <th className='py-1 pr-2'>Lô</th>
+                                    <th className='py-1 pr-2'>Tồn</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {inventoryCheck.balances?.map((b, i) => (
+                                    <tr key={i}>
+                                      <td className='py-1'>{getItemName(b.item_id)}</td>
+                                      <td className='py-1'>{b.lot_id?.lot_code || '(không lô)'}</td>
+                                      <td className='py-1 font-medium'>{b.qty_on_hand ?? 0}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* Action buttons */}
                 <div className='flex flex-wrap gap-2 border-t border-slate-200 pt-4'>
                   {detailReturn.status === 'PENDING' && (

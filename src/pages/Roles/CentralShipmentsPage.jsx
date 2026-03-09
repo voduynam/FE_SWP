@@ -52,16 +52,19 @@ export default function CentralShipmentsPage() {
   const [createError, setCreateError] = useState('');
 
   // Create form state
+  const [createDataLoading, setCreateDataLoading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [orderDetail, setOrderDetail] = useState(null);
   const [orderDetailLoading, setOrderDetailLoading] = useState(false);
-  const [locations, setLocations] = useState([]);
+  const [fromLocations, setFromLocations] = useState([]);
+  const [toLocations, setToLocations] = useState([]);
   const [fromLocationId, setFromLocationId] = useState('');
   const [toLocationId, setToLocationId] = useState('');
   const [shipDate, setShipDate] = useState(() => new Date().toISOString().slice(0, 16));
   const [shipLines, setShipLines] = useState([]);
   const [lotsByItemId, setLotsByItemId] = useState({});
+  const [lotsLoading, setLotsLoading] = useState(false);
 
   /* ─── Load shipment list ─── */
   const loadShipments = async (page = 1) => {
@@ -125,6 +128,7 @@ export default function CentralShipmentsPage() {
   const handleDispatch = async shipment => {
     setActionLoadingId(shipment._id);
     setSuccess('');
+    setDetailError(null);
     try {
       const res = await workflowService.dispatchShipment(shipment._id);
       if (res.success) {
@@ -132,10 +136,10 @@ export default function CentralShipmentsPage() {
         setDetailShipment(prev => (prev?._id === shipment._id ? { ...prev, status: 'SHIPPED' } : prev));
         loadShipments(pagination.page);
       } else {
-        alert(res.message || 'Xuất kho thất bại');
+        setDetailError(res.message || 'Xuất kho thất bại');
       }
     } catch (err) {
-      alert(err?.response?.data?.message || 'Xuất kho thất bại');
+      setDetailError(err?.response?.data?.message || err?.message || 'Xuất kho thất bại');
     } finally {
       setActionLoadingId(null);
     }
@@ -159,20 +163,29 @@ export default function CentralShipmentsPage() {
     setOrderDetail(null);
     setShipLines([]);
     setLotsByItemId({});
+    setCreateDataLoading(true);
     const loadData = async () => {
-      const [approvedRes, processingRes, locRes] = await Promise.all([
-        workflowService.getInternalOrders({ status: 'APPROVED', limit: 100 }),
-        workflowService.getInternalOrders({ status: 'PROCESSING', limit: 100 }),
-        workflowService.getLocations({ limit: 100 }),
-      ]);
-      const combinedOrders = [...getList(approvedRes), ...getList(processingRes)];
-      setOrders(combinedOrders);
-      setLocations(getList(locRes));
+      try {
+        const [approvedRes, processingRes, locKitchenRes, locStoreRes] = await Promise.all([
+          workflowService.getInternalOrders({ status: 'APPROVED', limit: 100 }),
+          workflowService.getInternalOrders({ status: 'PROCESSING', limit: 100 }),
+          workflowService.getLocations({ org_unit_type: 'KITCHEN', limit: 100 }),
+          workflowService.getLocations({ org_unit_type: 'STORE', limit: 100 }),
+        ]);
+        const combinedOrders = [...getList(approvedRes), ...getList(processingRes)];
+        setOrders(combinedOrders);
+        setFromLocations(getList(locKitchenRes));
+        setToLocations(getList(locStoreRes));
+      } catch (e) {
+        setCreateError(e?.message || 'Không tải được đơn hàng hoặc danh sách kho.');
+      } finally {
+        setCreateDataLoading(false);
+      }
     };
     loadData();
   }, [createOpen]);
 
-  /* ─── When order selected → load detail + lots ─── */
+  /* ─── When order selected → load detail ─── */
   useEffect(() => {
     if (!selectedOrderId) {
       setOrderDetail(null);
@@ -209,20 +222,59 @@ export default function CentralShipmentsPage() {
         };
       });
       setShipLines(lines);
-
-      const byId = {};
-      await Promise.all(
-        lines.map(async l => {
-          if (byId[l.item_id]) return;
-          const lotRes = await workflowService.getLots({ item_id: l.item_id, limit: 50 });
-          if (cancelled) return;
-          byId[l.item_id] = getList(lotRes);
-        })
-      );
-      if (!cancelled) setLotsByItemId(byId);
+      setLotsByItemId({});
     });
     return () => { cancelled = true; };
   }, [selectedOrderId]);
+
+  /* ─── When from_location selected → load lots CHỈ từ tồn kho tại kho xuất (không fallback getLots) ─── */
+  useEffect(() => {
+    if (!fromLocationId || !orderDetail?.lines?.length) {
+      setLotsByItemId({});
+      return;
+    }
+    let cancelled = false;
+    setLotsLoading(true);
+    const loadLots = async () => {
+      const byId = {};
+      const itemIds = [...new Set((orderDetail.lines || []).map(l => l.item_id?._id || l.item_id))];
+      const locIdStr = String(fromLocationId);
+      const refDate = shipDate ? new Date(shipDate) : new Date();
+      refDate.setHours(0, 0, 0, 0);
+      const refTime = refDate.getTime();
+
+      for (const itemId of itemIds) {
+        if (cancelled) break;
+        const balRes = await workflowService.getInventoryBalances({
+          location_id: fromLocationId,
+          item_id: itemId,
+          limit: 100,
+          page: 1,
+        });
+        if (cancelled) break;
+        const rawList = Array.isArray(balRes?.data) ? balRes.data : (balRes?.data?.data ?? []);
+        const list = rawList.filter(b => {
+          const locId = b.location_id?._id ?? b.location_id;
+          return String(locId) === locIdStr;
+        });
+        const lots = list
+          .filter(b => (b.qty_on_hand ?? 0) > 0)
+          .filter(b => !b.lot_id?.exp_date || new Date(b.lot_id.exp_date).setHours(0, 0, 0, 0) >= refTime)
+          .sort((a, b) => (a.lot_id?.exp_date ? new Date(a.lot_id.exp_date).getTime() : 0) - (b.lot_id?.exp_date ? new Date(b.lot_id.exp_date).getTime() : 0))
+          .map(b => ({
+            _id: b.lot_id?._id ?? '__NO_LOT__',
+            lot_code: b.lot_id?.lot_code ?? 'Tồn chung (không lô)',
+            exp_date: b.lot_id?.exp_date,
+            qty_available: b.qty_on_hand ?? 0,
+          }));
+        byId[itemId] = lots;
+      }
+      if (!cancelled) setLotsByItemId(byId);
+      setLotsLoading(false);
+    };
+    loadLots();
+    return () => { cancelled = true; setLotsLoading(false); };
+  }, [fromLocationId, orderDetail, shipDate]);
 
   /* ─── Line lot management ─── */
   const addLotToLine = idx => {
@@ -238,6 +290,11 @@ export default function CentralShipmentsPage() {
       const next = [...prev];
       const lots = [...next[lineIdx].lots];
       lots[lotIdx] = { ...lots[lotIdx], [field]: field === 'qty' ? (Number(value) || 0) : value };
+      if (field === 'lot_id' && value) {
+        const otherQty = lots.reduce((sum, lt, i) => (i !== lotIdx ? sum + (Number(lt.qty) || 0) : sum), 0);
+        const remainingToAlloc = Math.max(0, (next[lineIdx].qty_remaining || 0) - otherQty);
+        lots[lotIdx].qty = remainingToAlloc;
+      }
       const totalLotQty = lots.reduce((sum, lt) => sum + (Number(lt.qty) || 0), 0);
       next[lineIdx] = { ...next[lineIdx], lots, qty: totalLotQty };
       return next;
@@ -264,25 +321,44 @@ export default function CentralShipmentsPage() {
       if (!fromLocationId) { setCreateError('Vui lòng chọn kho xuất.'); setCreating(false); return; }
       if (!toLocationId) { setCreateError('Vui lòng chọn kho nhận.'); setCreating(false); return; }
 
-      const linesToSend = shipLines
-        .filter(l => l.qty > 0 && l.lots.length > 0)
-        .map(l => ({
-          order_line_id: l.order_line_id,
-          item_id: l.item_id,
-          qty: l.qty,
-          uom_id: l.uom_id,
-          lots: l.lots.filter(lt => lt.lot_id && lt.qty > 0).map(lt => ({ lot_id: lt.lot_id, qty: lt.qty })),
-        }));
-
-      if (!linesToSend.length) {
-        setCreateError('Vui lòng thêm ít nhất 1 dòng với lot và số lượng > 0.');
+      const noStockLine = shipLines.find(l => l.qty > 0 && (lotsByItemId[l.item_id] || []).length === 0);
+      if (noStockLine) {
+        setCreateError(`Sản phẩm "${noStockLine.item_name}" không có lô nào có tồn tại kho xuất. Vui lòng nhập kho hoặc điều chỉnh tồn kho trước.`);
         setCreating(false);
         return;
       }
 
-      const invalidLine = linesToSend.find(l => !l.lots.length);
-      if (invalidLine) {
-        setCreateError('Mỗi dòng giao phải có ít nhất 1 lô (lot).');
+      const mixedLine = shipLines.find(l => {
+        const hasReal = l.lots.some(lt => lt.lot_id && lt.lot_id !== '__NO_LOT__' && lt.qty > 0);
+        const hasNoLot = l.lots.some(lt => lt.lot_id === '__NO_LOT__' && lt.qty > 0);
+        return hasReal && hasNoLot;
+      });
+      if (mixedLine) {
+        setCreateError('Không thể trộn "Tồn chung" với lô cụ thể trong cùng dòng. Vui lòng chọn một loại.');
+        setCreating(false);
+        return;
+      }
+
+      const linesToSend = shipLines
+        .filter(l => l.qty > 0 && l.lots.length > 0)
+        .map(l => {
+          const validLots = l.lots.filter(lt => lt.lot_id && lt.lot_id !== '__NO_LOT__' && lt.qty > 0);
+          const hasNoLot = l.lots.some(lt => lt.lot_id === '__NO_LOT__' && lt.qty > 0);
+          const lots = validLots.length > 0
+            ? validLots.map(lt => ({ lot_id: lt.lot_id, qty: lt.qty }))
+            : (hasNoLot ? [] : []);
+          return {
+            order_line_id: l.order_line_id,
+            item_id: l.item_id,
+            qty: l.qty,
+            uom_id: l.uom_id,
+            lots,
+          };
+        })
+        .filter(l => l.lots.length > 0 || l.qty > 0);
+
+      if (!linesToSend.length) {
+        setCreateError('Vui lòng thêm ít nhất 1 dòng với lot và số lượng > 0.');
         setCreating(false);
         return;
       }
@@ -292,6 +368,18 @@ export default function CentralShipmentsPage() {
         setCreateError(`Số lượng giao "${overLine.item_name}" (${overLine.qty}) vượt quá số còn lại (${overLine.qty_remaining}).`);
         setCreating(false);
         return;
+      }
+
+      for (const line of linesToSend) {
+        for (const lt of line.lots) {
+          const lotId = lt.lot_id === '__NO_LOT__' ? null : lt.lot_id;
+          const avail = (lotsByItemId[line.item_id] || []).find(l => (l._id === '__NO_LOT__' ? !lotId : l._id === lotId))?.qty_available ?? Infinity;
+          if (lt.qty > avail) {
+            setCreateError(`Số lượng lô vượt quá tồn tại kho xuất. Vui lòng làm mới và chọn lại.`);
+            setCreating(false);
+            return;
+          }
+        }
       }
 
       const payload = {
@@ -312,7 +400,8 @@ export default function CentralShipmentsPage() {
       setSuccess('Đã tạo lô giao hàng thành công. Đơn hàng sẽ tự động chuyển trạng thái SHIPPED.');
       loadShipments(1);
     } catch (err) {
-      setCreateError(err?.response?.data?.message || 'Có lỗi khi tạo lô giao hàng');
+      const msg = err?.response?.data?.message || err?.message || 'Có lỗi khi tạo lô giao hàng';
+      setCreateError(msg);
     } finally {
       setCreating(false);
     }
@@ -328,6 +417,20 @@ export default function CentralShipmentsPage() {
     if (!loc) return '-';
     if (typeof loc === 'object') return `${loc.name || loc.code || loc._id}${loc.org_unit_id?.name ? ` (${loc.org_unit_id.name})` : ''}`;
     return loc;
+  };
+
+  const isDiscreteUom = (uomCodeOrName) => {
+    const u = (uomCodeOrName || '').toString().toUpperCase();
+    return ['PACK', 'CARTON', 'UNIT'].includes(u);
+  };
+
+  const getValidLotsForLine = (itemId) => {
+    const list = lotsByItemId[itemId] || [];
+    const refDate = shipDate ? new Date(shipDate) : new Date();
+    refDate.setHours(0, 0, 0, 0);
+    const refTime = refDate.getTime();
+    const valid = list.filter(l => !l.exp_date || new Date(l.exp_date).setHours(0, 0, 0, 0) >= refTime);
+    return valid.sort((a, b) => (a.exp_date ? new Date(a.exp_date).getTime() : 0) - (b.exp_date ? new Date(b.exp_date).getTime() : 0));
   };
 
   return (
@@ -485,23 +588,8 @@ export default function CentralShipmentsPage() {
                       </button>
                     </>
                   )}
-                  {detailShipment.status === 'SHIPPED' && (
-                    <button
-                      disabled={actionLoadingId === detailShipment._id}
-                      onClick={() => updateStatus(detailShipment, 'IN_TRANSIT')}
-                      className='rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60'
-                    >
-                      {actionLoadingId === detailShipment._id ? 'Đang xử lý...' : 'Đang vận chuyển (IN_TRANSIT)'}
-                    </button>
-                  )}
                   {['SHIPPED', 'IN_TRANSIT'].includes(detailShipment.status) && (
-                    <button
-                      disabled={actionLoadingId === detailShipment._id}
-                      onClick={() => updateStatus(detailShipment, 'DELIVERED')}
-                      className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
-                    >
-                      {actionLoadingId === detailShipment._id ? 'Đang xử lý...' : 'Đã giao đến (DELIVERED)'}
-                    </button>
+                    <p className='text-xs text-slate-500'>Đang vận chuyển và Đã giao đến do Driver cập nhật.</p>
                   )}
                 </div>
 
@@ -552,6 +640,7 @@ export default function CentralShipmentsPage() {
               <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
+            {createDataLoading && <p className='mb-3 text-sm text-slate-500'>Đang tải đơn hàng và danh sách kho...</p>}
 
             <form onSubmit={submitCreate} className='space-y-4'>
               {/* Select order */}
@@ -564,6 +653,7 @@ export default function CentralShipmentsPage() {
                   onChange={e => setSelectedOrderId(e.target.value)}
                   className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
                   required
+                  disabled={createDataLoading}
                 >
                   <option value=''>-- Chọn đơn hàng --</option>
                   {orders.map(o => (
@@ -572,31 +662,34 @@ export default function CentralShipmentsPage() {
                     </option>
                   ))}
                 </select>
+                {!createDataLoading && orders.length === 0 && <p className='mt-1 text-xs text-amber-600'>Chưa có đơn hàng APPROVED hoặc PROCESSING.</p>}
               </div>
 
-              {/* Locations */}
+              {/* Locations: kho xuất = KITCHEN, kho nhận = STORE */}
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Kho xuất (Bếp trung tâm)</label>
-                  <select value={fromLocationId} onChange={e => setFromLocationId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required>
+                  <select value={fromLocationId} onChange={e => setFromLocationId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required disabled={createDataLoading}>
                     <option value=''>-- Chọn kho xuất --</option>
-                    {locations.map(l => (
+                    {fromLocations.map(l => (
                       <option key={l._id} value={l._id}>
                         {l.name || l.code} {l.org_unit_id?.name ? `(${l.org_unit_id.name})` : ''}
                       </option>
                     ))}
                   </select>
+                  {!createDataLoading && fromLocations.length === 0 && <p className='mt-1 text-xs text-amber-600'>Chưa có kho bếp trung tâm. Cấu hình Location thuộc Org Unit type KITCHEN.</p>}
                 </div>
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Kho nhận (Cửa hàng)</label>
-                  <select value={toLocationId} onChange={e => setToLocationId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required>
+                  <select value={toLocationId} onChange={e => setToLocationId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required disabled={createDataLoading}>
                     <option value=''>-- Chọn kho nhận --</option>
-                    {locations.map(l => (
+                    {toLocations.map(l => (
                       <option key={l._id} value={l._id}>
                         {l.name || l.code} {l.org_unit_id?.name ? `(${l.org_unit_id.name})` : ''}
                       </option>
                     ))}
                   </select>
+                  {!createDataLoading && toLocations.length === 0 && <p className='mt-1 text-xs text-amber-600'>Chưa có kho cửa hàng. Cấu hình Location thuộc Org Unit type STORE.</p>}
                 </div>
               </div>
 
@@ -612,9 +705,15 @@ export default function CentralShipmentsPage() {
               {/* Lines with lot selection */}
               {orderDetail && shipLines.length > 0 && !orderDetailLoading && (
                 <div className='space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
-                  <div className='text-sm font-medium text-slate-700'>
-                    Chọn lô (lot) cho từng sản phẩm — FIFO (ưu tiên lot cũ nhất)
-                  </div>
+                  {!fromLocationId ? (
+                    <p className='text-sm text-amber-600'>Vui lòng chọn kho xuất trước để xem lô có sẵn tại kho.</p>
+                  ) : lotsLoading ? (
+                    <p className='text-sm text-slate-500'>Đang tải lô có tồn tại kho xuất...</p>
+                  ) : (
+                    <div className='text-sm font-medium text-slate-700'>
+                      Chọn lô (lot) cho từng sản phẩm — Chỉ hiển thị lô có tồn tại kho xuất, FIFO (ưu tiên lot cũ nhất)
+                    </div>
+                  )}
                   {shipLines.map((line, lineIdx) => (
                     <div key={lineIdx} className='rounded-lg border border-slate-200 bg-white p-3'>
                       <div className='mb-2 flex items-center justify-between'>
@@ -627,6 +726,11 @@ export default function CentralShipmentsPage() {
                         <span className='text-sm font-medium text-orange-600'>Giao: {line.qty}</span>
                       </div>
 
+                      {fromLocationId && getValidLotsForLine(line.item_id).length === 0 && (
+                        <p className='mt-1 text-sm text-red-600'>
+                          Không có lô nào có tồn tại kho xuất cho sản phẩm này. Vui lòng nhập kho hoặc điều chỉnh tồn kho tại kho xuất đã chọn trước khi tạo lô giao hàng.
+                        </p>
+                      )}
                       {/* Lot rows */}
                       {line.lots.map((lot, lotIdx) => (
                         <div key={lotIdx} className='mt-1 flex items-center gap-2'>
@@ -636,10 +740,11 @@ export default function CentralShipmentsPage() {
                             className='flex-1 rounded border border-slate-200 px-2 py-1 text-sm'
                           >
                             <option value=''>-- Chọn lô --</option>
-                            {(lotsByItemId[line.item_id] || []).map(l => (
+                            {getValidLotsForLine(line.item_id).map(l => (
                               <option key={l._id} value={l._id}>
                                 {l.lot_code || l._id}
                                 {l.exp_date ? ` (HSD: ${new Date(l.exp_date).toLocaleDateString('vi-VN')})` : ''}
+                                {l.qty_available != null ? ` — Tồn: ${l.qty_available}` : ''}
                               </option>
                             ))}
                           </select>
@@ -647,6 +752,7 @@ export default function CentralShipmentsPage() {
                             type='number'
                             min={0}
                             max={line.qty_remaining}
+                            step={isDiscreteUom(line.uom_name) ? 1 : 0.01}
                             value={lot.qty}
                             onChange={e => updateLotInLine(lineIdx, lotIdx, 'qty', e.target.value)}
                             className='w-24 rounded border border-slate-200 px-2 py-1 text-sm'
@@ -665,7 +771,7 @@ export default function CentralShipmentsPage() {
                 <button type='button' disabled={creating} onClick={() => setCreateOpen(false)} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
                 <button
                   type='submit'
-                  disabled={creating || !selectedOrderId || orderDetailLoading || shipLines.length === 0}
+                  disabled={creating || lotsLoading || !selectedOrderId || orderDetailLoading || shipLines.length === 0}
                   className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
                 >
                   {creating ? 'Đang tạo...' : 'Tạo lô giao hàng'}
