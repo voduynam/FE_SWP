@@ -37,6 +37,10 @@ const DISPOSITION_TYPES = {
 
 const PAGE_SIZE = 10;
 
+// Đơn vị tính dạng “rời” (đếm được) → SL trả là số nguyên
+// Các UOM còn lại (KG, L, v.v.) cho phép nhập thập phân
+const DISCRETE_UOMS = ['PACK', 'UNIT', 'CARTON'];
+
 function getList(res) {
   if (!res?.success) return [];
   if (Array.isArray(res.data)) return res.data;
@@ -559,10 +563,15 @@ export default function StoreReturnRequestPage() {
                             </td>
                             <td className='px-2 py-2 text-slate-600'>{line.qty_received}</td>
                             <td className='px-2 py-2'>
+                              {/*
+                                Nếu đơn vị tính là PACK/UNIT/CARTON → bước nhảy 1
+                                Ngược lại (KG, L, ...) → cho phép thập phân (0.01)
+                              */}
                               <input
                                 type='number'
                                 min={0}
                                 max={line.qty_received}
+                                step={DISCRETE_UOMS.includes((line.uom_name || '').toUpperCase()) ? 1 : 0.01}
                                 value={line.qty_return}
                                 onChange={e => handleLineChange(idx, 'qty_return', e.target.value)}
                                 className='w-20 rounded border border-slate-200 px-2 py-1 text-sm'
