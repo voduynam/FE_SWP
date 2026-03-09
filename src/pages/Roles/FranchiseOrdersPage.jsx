@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { paymentService } from '../../services/paymentService';
 import { useAuth } from '../../contexts/AuthContext';
 
 const ORDER_STATUS = {
@@ -44,9 +45,18 @@ export default function FranchiseOrdersPage() {
   const [detailError, setDetailError] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingOrderBody, setPendingOrderBody] = useState(null);
+  const [pendingOrderTotal, setPendingOrderTotal] = useState(0);
+  const [existingOrderForPayment, setExistingOrderForPayment] = useState(null);
+  const [paymentConfirmOpen, setPaymentConfirmOpen] = useState(false);
+  const [pendingPaymentInfo, setPendingPaymentInfo] = useState(null);
+  const [redirectingToPayOS, setRedirectingToPayOS] = useState(false);
+
   const [newOrder, setNewOrder] = useState({
     order_date: getLocalDateTimeString(),
     is_urgent: false,
+    payment_type: 'CASH',
     lines: [{ item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
   });
 
@@ -100,7 +110,11 @@ export default function FranchiseOrdersPage() {
   // Mỗi lần mở modal tạo đơn, đặt lại ngày giờ = hiện tại (local)
   useEffect(() => {
     if (createOpen) {
-      setNewOrder(prev => ({ ...prev, order_date: getLocalDateTimeString() }));
+      setNewOrder(prev => ({
+        ...prev,
+        order_date: getLocalDateTimeString(),
+        payment_type: prev.payment_type || 'CASH',
+      }));
     }
   }, [createOpen]);
 
@@ -199,18 +213,96 @@ export default function FranchiseOrdersPage() {
     return { error: null, body };
   };
 
-  /** Gửi đơn đến bếp trung tâm: tạo đơn (DRAFT) rồi gửi ngay (SUBMITTED) – đúng luồng đặt hàng */
-  const submitCreateAndSend = async e => {
+  const openConfirmModal = e => {
     e.preventDefault();
     const { error, body } = validateAndBuildBody();
     if (error) {
       setCreateError(error);
       return;
     }
+
+    const estimatedTotal = newOrder.lines
+      .filter(l => l.item_id && (l.qty_ordered || 0) > 0)
+      .reduce(
+        (sum, l) =>
+          sum +
+          (Number(l.qty_ordered || 0) *
+            Math.max(0, Number(l.unit_price || 0))),
+        0
+      );
+
+    setExistingOrderForPayment(null);
+    setPendingOrderBody(body);
+    setPendingOrderTotal(estimatedTotal);
+    setCreateOpen(false);
+    setConfirmOpen(true);
+  };
+
+  const createPaymentForOrder = async (orderId, orderNo, paymentType, orderAmount) => {
+    if (!paymentType) return;
+    try {
+      const res = await paymentService.createPayment({
+        order_id: orderId,
+        payment_type: paymentType,
+      });
+
+      if (!res.success) {
+        setSuccess('');
+        alert(res.message || 'Tạo thanh toán thất bại. Đơn đã được gửi nhưng chưa ghi nhận thanh toán.');
+        return;
+      }
+
+      const paymentData = res.data || {};
+
+      if (paymentType === 'BANK_TRANSFER') {
+        const payment = paymentData.payment || {};
+        const checkoutUrl =
+          paymentData.checkout_url ||
+          paymentData.payos_link ||
+          paymentData.payment_link ||
+          '';
+        const amount = orderAmount ?? payment.amount ?? 0;
+
+        setPendingPaymentInfo({
+          orderId,
+          orderNo,
+          amount,
+          checkoutUrl,
+        });
+        // Đóng popup xác nhận đơn, mở alert xác nhận thanh toán
+        setConfirmOpen(false);
+        setPaymentConfirmOpen(true);
+      } else {
+        // CASH: đóng flow và reset form
+        setSuccess(`Đã đặt hàng và thanh toán tiền mặt cho đơn ${orderNo}.`);
+        setConfirmOpen(false);
+        setCreateOpen(false);
+        setExistingOrderForPayment(null);
+        setNewOrder({
+          order_date: getLocalDateTimeString(),
+          is_urgent: false,
+          payment_type: 'CASH',
+          lines: [{ item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
+        });
+        setPendingOrderBody(null);
+        setPendingOrderTotal(0);
+      }
+    } catch (error) {
+      console.error('Create payment error:', error);
+      alert(
+        error?.response?.data?.message ||
+          'Có lỗi khi tạo thanh toán. Đơn đã được gửi nhưng chưa ghi nhận thanh toán.'
+      );
+    }
+  };
+
+  /** Gửi đơn đến bếp trung tâm: tạo đơn (DRAFT) rồi gửi ngay (SUBMITTED) – đúng luồng đặt hàng */
+  const submitCreateAndSend = async () => {
+    if (!pendingOrderBody) return;
     setCreating(true);
     setCreateError('');
     try {
-      const createRes = await workflowService.createInternalOrder(body);
+      const createRes = await workflowService.createInternalOrder(pendingOrderBody);
       if (!createRes.success) {
         setCreateError(createRes.message || 'Tạo đơn thất bại');
         setCreating(false);
@@ -224,19 +316,25 @@ export default function FranchiseOrdersPage() {
         return;
       }
       const orderNo = createdOrder?.order_no || orderId;
-      const statusRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
-      if (!statusRes.success) {
-        setCreateError(statusRes.message || 'Đơn đã tạo nhưng gửi thất bại. Vui lòng vào Chi tiết đơn để Gửi đơn.');
-        setCreating(false);
-        return;
+      const orderAmount = createdOrder?.total_amount;
+
+      const paymentType = newOrder.payment_type || 'CASH';
+
+      // Với tiền mặt: gửi đơn (SUBMITTED) ngay trước khi tạo payment
+      if (paymentType === 'CASH') {
+        const statusRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
+        if (!statusRes.success) {
+          setCreateError(statusRes.message || 'Đơn đã tạo nhưng gửi thất bại. Vui lòng vào Chi tiết đơn để Gửi đơn.');
+          setCreating(false);
+          return;
+        }
       }
-      setCreateOpen(false);
-      setNewOrder({
-        order_date: getLocalDateTimeString(),
-        is_urgent: false,
-        lines: [{ item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
-      });
-      setSuccess(`Đã đặt hàng và gửi đơn ${orderNo} lên bếp trung tâm.`);
+      await createPaymentForOrder(
+        orderId,
+        orderNo,
+        paymentType,
+        orderAmount
+      );
       setCreateError('');
       loadOrders(1).catch(() => { /* danh sách sẽ cập nhật khi user tự refresh */ });
     } catch (err) {
@@ -286,16 +384,46 @@ export default function FranchiseOrdersPage() {
     setActionLoadingId(order._id);
     setSuccess('');
     try {
-      const res = await workflowService.updateInternalOrderStatus(order._id, 'SUBMITTED');
-      if (res.success) {
-        setSuccess(`Đơn ${order.order_no || order._id} đã gửi (SUBMITTED). Không thể chỉnh sửa sau khi gửi.`);
-        setDetailOrder(prev => (prev?._id === order._id ? { ...prev, status: 'SUBMITTED' } : prev));
-        await loadOrders(pagination.page);
-      } else {
-        setSuccess('');
-        alert(res.message || 'Gửi đơn thất bại');
+      // Lấy đầy đủ thông tin đơn + lines để hiển thị ở popup xác nhận
+      const res = await workflowService.getInternalOrder(order._id);
+      if (!res.success || !res.data) {
+        alert(res.message || 'Không lấy được thông tin đơn hàng');
+        return;
       }
+
+      const fullOrder = res.data;
+      setExistingOrderForPayment(fullOrder);
+
+      // Map dữ liệu BE -> newOrder để tái sử dụng UI xác nhận
+      const mappedLines = (fullOrder.lines || []).map(line => ({
+        item_id: typeof line.item_id === 'object' ? line.item_id._id : line.item_id,
+        qty_ordered: line.qty_ordered ?? 0,
+        uom_id: typeof line.uom_id === 'object' ? line.uom_id._id : line.uom_id,
+        unit_price: line.unit_price ?? 0,
+        line_total: line.line_total ?? (line.qty_ordered || 0) * (line.unit_price || 0),
+      }));
+
+      setNewOrder(prev => ({
+        ...prev,
+        order_date: fullOrder.order_date
+          ? new Date(fullOrder.order_date).toISOString().slice(0, 16)
+          : getLocalDateTimeString(),
+        is_urgent: !!fullOrder.is_urgent,
+        // Giữ lựa chọn payment_type hiện tại hoặc mặc định CASH
+        payment_type: prev.payment_type || 'CASH',
+        lines: mappedLines.length
+          ? mappedLines
+          : prev.lines,
+      }));
+
+      setPendingOrderBody({ existingOrderId: fullOrder._id });
+      setPendingOrderTotal(fullOrder.total_amount || mappedLines.reduce((sum, l) => sum + (l.line_total || 0), 0));
+
+      setConfirmOpen(true);
+      setDetailId(null);
+      setDetailOrder(null);
     } catch (err) {
+      console.error(err);
       alert(err?.response?.data?.message || 'Gửi đơn thất bại');
     } finally {
       setActionLoadingId(null);
@@ -573,7 +701,7 @@ export default function FranchiseOrdersPage() {
         document.body
       )}
 
-      {/* Modal đặt hàng – render qua Portal */}
+      {/* Modal đặt hàng – bước 1: chọn sản phẩm */}
       {createOpen && createPortal(
         <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setCreateOpen(false)}>
           <div
@@ -581,15 +709,15 @@ export default function FranchiseOrdersPage() {
             onClick={e => e.stopPropagation()}
           >
             <div className='mb-4 flex items-center justify-between'>
-              <h2 className='text-lg font-semibold text-slate-900'>Đặt hàng – Gửi đơn lên bếp trung tâm</h2>
+              <h2 className='text-lg font-semibold text-slate-900'>Đặt hàng – Chọn sản phẩm</h2>
               <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             <p className='mb-3 text-sm text-slate-600'>
-              Điền đơn hàng và bấm <strong>Gửi đơn đến bếp trung tâm</strong> để bếp nhận đơn. Nếu chưa xong, có thể <strong>Lưu nháp</strong> rồi gửi sau.
+              Chọn sản phẩm và số lượng cần đặt. Bấm <strong>Thanh toán</strong> để sang bước xác nhận đơn và chọn hình thức thanh toán. Nếu chưa xong, có thể <strong>Lưu nháp</strong> rồi đặt sau.
             </p>
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
 
-            <form onSubmit={submitCreateAndSend} className='space-y-4'>
+            <form onSubmit={openConfirmModal} className='space-y-4'>
               <div>
                 <label className='block text-sm font-medium text-slate-700'>Ngày giờ đặt hàng</label>
                 <input
@@ -692,10 +820,242 @@ export default function FranchiseOrdersPage() {
                   disabled={creating}
                   className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
                 >
-                  {creating ? 'Đang gửi đơn...' : 'Gửi đơn đến bếp trung tâm'}
+                  {creating ? 'Đang xử lý...' : 'Thanh toán'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal xác nhận đơn + chọn hình thức thanh toán – bước 2 */}
+      {confirmOpen && pendingOrderBody && createPortal(
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setConfirmOpen(false)}>
+          <div
+            className='w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center justify-between'>
+              <h2 className='text-lg font-semibold text-slate-900'>Xác nhận đơn hàng</h2>
+              <button onClick={() => !creating && setConfirmOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+            </div>
+
+            <div className='space-y-4 text-sm'>
+              <div className='grid grid-cols-2 gap-2'>
+                <span className='text-slate-500'>Ngày đặt:</span>
+                <span>{newOrder.order_date ? new Date(newOrder.order_date).toLocaleString('vi-VN') : '-'}</span>
+                <span className='text-slate-500'>Đơn gấp:</span>
+                <span>{newOrder.is_urgent ? 'Có' : 'Không'}</span>
+                <span className='text-slate-500'>Tổng tiền tạm tính:</span>
+                <span className='font-medium'>{Number(pendingOrderTotal || 0).toLocaleString('vi-VN')} đ</span>
+              </div>
+
+              <div>
+                <h3 className='mb-2 text-sm font-medium text-slate-700'>Chi tiết sản phẩm</h3>
+                <table className='w-full text-sm'>
+                  <thead className='bg-slate-50 text-left text-xs text-slate-500'>
+                    <tr>
+                      <th className='px-3 py-2'>Sản phẩm</th>
+                      <th className='px-3 py-2'>SL</th>
+                      <th className='px-3 py-2'>Đơn giá</th>
+                      <th className='px-3 py-2'>Thành tiền</th>
+                    </tr>
+                  </thead>
+                  <tbody className='divide-y divide-slate-100'>
+                    {newOrder.lines
+                      .filter(l => l.item_id && (l.qty_ordered || 0) > 0)
+                      .map((line, idx) => {
+                        const it = items.find(i => i._id === line.item_id);
+                        const name = it?.name || getItemName(line);
+                        const qty = Number(line.qty_ordered || 0);
+                        const price = Math.max(0, Number(line.unit_price || 0));
+                        const lineTotal = qty * price;
+                        return (
+                          <tr key={idx}>
+                            <td className='px-3 py-2'>{name}</td>
+                            <td className='px-3 py-2'>{qty}</td>
+                            <td className='px-3 py-2'>{price.toLocaleString('vi-VN')} đ</td>
+                            <td className='px-3 py-2'>{lineTotal.toLocaleString('vi-VN')} đ</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <span className='block text-sm font-medium text-slate-700 mb-1'>Hình thức thanh toán</span>
+                <div className='flex flex-wrap gap-4 text-sm'>
+                  <label className='inline-flex items-center gap-2'>
+                    <input
+                      type='radio'
+                      name='payment_type_confirm'
+                      value='CASH'
+                      checked={newOrder.payment_type === 'CASH'}
+                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
+                    />
+                    <span>Tiền mặt tại quầy</span>
+                  </label>
+                  <label className='inline-flex items-center gap-2'>
+                    <input
+                      type='radio'
+                      name='payment_type_confirm'
+                      value='BANK_TRANSFER'
+                      checked={newOrder.payment_type === 'BANK_TRANSFER'}
+                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
+                    />
+                    <span>Chuyển khoản (PayOS)</span>
+                  </label>
+                </div>
+                <p className='mt-1 text-xs text-slate-500'>
+                  Chọn tiền mặt nếu khách thanh toán trực tiếp. Chọn chuyển khoản để được chuyển sang trang thanh toán PayOS.
+                </p>
+              </div>
+
+              <div className='flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4'>
+                <button
+                  type='button'
+                  disabled={creating}
+                  onClick={() => {
+                    setConfirmOpen(false);
+                    setCreateOpen(true);
+                  }}
+                  className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
+                >
+                  Quay lại chỉnh sửa
+                </button>
+                <button
+                  type='button'
+                  disabled={creating}
+                  onClick={() => {
+                    if (existingOrderForPayment) {
+                      // Đơn đã tồn tại (DRAFT) → dùng flow thanh toán cho đơn cũ
+                      (async () => {
+                        setCreating(true);
+                        try {
+                          const orderId = existingOrderForPayment._id;
+                          const orderNo = existingOrderForPayment.order_no || orderId;
+                          const orderAmount = existingOrderForPayment.total_amount || 0;
+                          const paymentType = newOrder.payment_type || 'CASH';
+
+                          // CASH: gửi đơn trước khi tạo payment
+                          if (paymentType === 'CASH') {
+                            const statusRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
+                            if (!statusRes.success) {
+                              setCreateError(statusRes.message || 'Đơn đã tạo nhưng gửi thất bại. Vui lòng thử lại sau.');
+                              setCreating(false);
+                              return;
+                            }
+                          }
+
+                          await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
+                          setCreateError('');
+                          loadOrders(1).catch(() => {});
+                        } catch (err) {
+                          console.error(err);
+                          setCreateError(err?.response?.data?.message || 'Có lỗi khi đặt hàng');
+                        } finally {
+                          setCreating(false);
+                        }
+                      })();
+                    } else {
+                      // Flow tạo đơn mới
+                      submitCreateAndSend();
+                    }
+                  }}
+                  className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60'
+                >
+                  {creating ? 'Đang đặt đơn...' : 'Đặt hàng'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal xác nhận thanh toán trước khi sang PayOS */}
+      {paymentConfirmOpen && pendingPaymentInfo && createPortal(
+        <div className='fixed inset-0 z-[10010] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && !redirectingToPayOS && setPaymentConfirmOpen(false)}>
+          <div
+            className='w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center justify-between'>
+              <h2 className='text-lg font-semibold text-slate-900'>
+                Xác nhận thanh toán
+              </h2>
+              <button
+                onClick={() => !creating && !redirectingToPayOS && setPaymentConfirmOpen(false)}
+                className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'
+              >
+                ×
+              </button>
+            </div>
+
+            <div className='space-y-3 text-sm text-slate-700'>
+              <p>
+                Xác nhận thanh toán cho đơn{' '}
+                <strong>{pendingPaymentInfo.orderNo}</strong> với số tiền{' '}
+                <strong>{Number(pendingPaymentInfo.amount || 0).toLocaleString('vi-VN')} đ</strong>.
+              </p>
+              <p className='text-xs text-slate-500'>
+                Sau khi xác nhận, bạn sẽ được chuyển sang trang thanh toán PayOS để hoàn tất chuyển khoản.
+              </p>
+              {redirectingToPayOS && (
+                <p className='text-xs text-emerald-600'>
+                  Đang chuyển đến trang thanh toán PayOS, vui lòng chờ...
+                </p>
+              )}
+            </div>
+
+            <div className='mt-5 flex flex-wrap justify-end gap-2'>
+              <button
+                type='button'
+                disabled={creating || redirectingToPayOS}
+                onClick={() => {
+                  // Đóng alert xác nhận thanh toán, quay lại popup xác nhận đơn
+                  setPaymentConfirmOpen(false);
+                  setConfirmOpen(true);
+                }}
+                className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
+              >
+                Để sau
+              </button>
+              <button
+                type='button'
+                disabled={creating || redirectingToPayOS}
+                onClick={async () => {
+                  if (redirectingToPayOS || creating) return;
+                  const url = pendingPaymentInfo.checkoutUrl;
+                  if (!url) {
+                    alert('Không tìm thấy link thanh toán PayOS. Vui lòng liên hệ quản trị hệ thống.');
+                    return;
+                  }
+
+                  setRedirectingToPayOS(true);
+
+                  // Khi staff đã xác nhận thanh toán, lúc này mới gửi đơn (SUBMITTED)
+                  try {
+                    if (pendingPaymentInfo.orderId) {
+                      await workflowService.updateInternalOrderStatus(
+                        pendingPaymentInfo.orderId,
+                        'SUBMITTED'
+                      );
+                    }
+                  } catch (err) {
+                    console.error('Update order status before PayOS redirect failed:', err);
+                    // Không chặn redirect, chỉ log lỗi
+                  }
+
+                  window.location.href = url;
+                }}
+                className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60'
+              >
+                {redirectingToPayOS ? 'Đang chuyển...' : 'Thanh toán ngay'}
+              </button>
+            </div>
           </div>
         </div>,
         document.body
