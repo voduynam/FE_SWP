@@ -39,6 +39,20 @@ export default function AdminUsersPage() {
     phone: '',
     role_id: '',
   });
+  const [showEdit, setShowEdit] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editForm, setEditForm] = useState({
+    _id: '',
+    org_unit_id: '',
+    full_name: '',
+    email: '',
+    phone: '',
+    status: 'ACTIVE',
+  });
+  const [showRolesModal, setShowRolesModal] = useState(false);
+  const [rolesUser, setRolesUser] = useState(null);
+  const [rolesSelection, setRolesSelection] = useState({});
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -141,6 +155,73 @@ export default function AdminUsersPage() {
     link.click();
     document.body.removeChild(link);
   };
+  const openEditUser = user => {
+    setEditError('');
+    setEditForm({
+      _id: user._id,
+      org_unit_id: user.org_unit_id?._id || user.org_unit_id || '',
+      full_name: user.full_name || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      status: (user.status || 'ACTIVE').toUpperCase(),
+    });
+    setShowEdit(true);
+  };
+
+  const handleDeleteUser = async user => {
+    if (!window.confirm(`Bạn có chắc muốn xóa người dùng "${user.full_name || user.username}"?`)) return;
+    const result = await workflowService.deleteUser(user._id);
+    if (!result.success) {
+      setError(result.message || 'Không thể xóa người dùng');
+      return;
+    }
+    setSuccessMessage('Xóa người dùng thành công.');
+    loadUsers();
+  };
+
+  const openRolesModal = user => {
+    const currentRoleIds = (user.roles || []).map(r => r._id);
+    const initialSelection = {};
+    roles.forEach(r => {
+      initialSelection[r._id] = currentRoleIds.includes(r._id);
+    });
+    setRolesSelection(initialSelection);
+    setRolesUser(user);
+    setShowRolesModal(true);
+  };
+
+  const exportDriversCsv = async () => {
+    const result = await workflowService.getDrivers({ limit: 500 });
+    if (!result.success) {
+      setError(result.message || 'Không tải được danh sách tài xế');
+      return;
+    }
+    const rows = getRows(result.data).map(d => ({
+      id: d._id,
+      name: d.full_name || d.username || '',
+      email: d.email || '',
+      phone: d.phone || '',
+      status: d.status || '',
+    }));
+    if (!rows.length) return;
+    const keys = Object.keys(rows[0]);
+    const csv = [keys.join(',')]
+      .concat(
+        rows.map(r =>
+          keys
+            .map(k => `"${(r[k] ?? '').toString().replace(/"/g, '""')}"`)
+            .join(','),
+        ),
+      )
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', 'drivers_export.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className='space-y-6 animate-fade-in'>
@@ -168,6 +249,9 @@ export default function AdminUsersPage() {
           </button>
           <button onClick={exportUsersCsv} className='btn-primary inline-flex items-center gap-2'>
             <Download className='h-4 w-4' /> Xuất
+          </button>
+          <button onClick={exportDriversCsv} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50'>
+            <Download className='h-4 w-4' /> Xuất tài xế
           </button>
           <button
             onClick={() => {
@@ -389,6 +473,263 @@ export default function AdminUsersPage() {
         </div>
       )}
 
+      {showEdit && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          onClick={() => !editing && setShowEdit(false)}
+        >
+          <div
+            className='bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='flex items-center justify-between mb-5'>
+              <h2 className='text-xl font-semibold text-slate-900'>Cập nhật người dùng</h2>
+              <button
+                type='button'
+                onClick={() => !editing && setShowEdit(false)}
+                className='text-slate-400 hover:text-slate-600 text-xl leading-none px-2'
+              >
+                ×
+              </button>
+            </div>
+
+            {editError && <p className='mb-3 text-sm text-red-600'>{editError}</p>}
+
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                setEditing(true);
+                setEditError('');
+                const payload = {
+                  org_unit_id: editForm.org_unit_id || undefined,
+                  full_name: editForm.full_name.trim(),
+                  email: editForm.email.trim(),
+                  phone: editForm.phone.trim(),
+                  status: editForm.status,
+                };
+                const result = await workflowService.updateUser(editForm._id, payload);
+                if (!result.success) {
+                  setEditError(result.message || 'Không thể cập nhật người dùng');
+                  setEditing(false);
+                  return;
+                }
+                await loadUsers();
+                setEditing(false);
+                setShowEdit(false);
+                setSuccessMessage('Cập nhật người dùng thành công.');
+              }}
+              className='space-y-5'
+            >
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Họ tên</label>
+                  <input
+                    type='text'
+                    required
+                    value={editForm.full_name}
+                    onChange={e =>
+                      setEditForm(f => ({
+                        ...f,
+                        full_name: e.target.value,
+                      }))
+                    }
+                    className='mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                  />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Email</label>
+                  <input
+                    type='email'
+                    required
+                    value={editForm.email}
+                    onChange={e =>
+                      setEditForm(f => ({
+                        ...f,
+                        email: e.target.value,
+                      }))
+                    }
+                    className='mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                  />
+                </div>
+              </div>
+
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Điện thoại</label>
+                  <input
+                    type='text'
+                    value={editForm.phone}
+                    onChange={e =>
+                      setEditForm(f => ({
+                        ...f,
+                        phone: e.target.value,
+                      }))
+                    }
+                    className='mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                  />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Trạng thái</label>
+                  <select
+                    value={editForm.status}
+                    onChange={e =>
+                      setEditForm(f => ({
+                        ...f,
+                        status: e.target.value,
+                      }))
+                    }
+                    className='mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                  >
+                    <option value='ACTIVE'>Hoạt động</option>
+                    <option value='INACTIVE'>Ngừng HĐ</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className='block text-sm font-medium text-slate-700'>Đơn vị / Cửa hàng</label>
+                <select
+                  value={editForm.org_unit_id}
+                  onChange={e =>
+                    setEditForm(f => ({
+                      ...f,
+                      org_unit_id: e.target.value,
+                    }))
+                  }
+                  className='mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                >
+                  <option value=''>Chọn đơn vị</option>
+                  {orgUnits.map(u => (
+                    <option key={u._id} value={u._id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
+                <button
+                  type='button'
+                  onClick={() => !editing && setShowEdit(false)}
+                  className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors'
+                >
+                  Hủy
+                </button>
+                <button
+                  type='submit'
+                  disabled={editing}
+                  className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-orange-600 disabled:opacity-60'
+                >
+                  {editing ? 'Đang lưu...' : 'Lưu thay đổi'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showRolesModal && rolesUser && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          onClick={() => setShowRolesModal(false)}
+        >
+          <div
+            className='bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='flex items-center justify-between mb-5'>
+              <h2 className='text-xl font-semibold text-slate-900'>
+                Phân quyền cho {rolesUser.full_name || rolesUser.username}
+              </h2>
+              <button
+                type='button'
+                onClick={() => setShowRolesModal(false)}
+                className='text-slate-400 hover:text-slate-600 text-xl leading-none px-2'
+              >
+                ×
+              </button>
+            </div>
+
+            <div className='space-y-3 mb-4'>
+              {roles.map(r => (
+                <label key={r._id} className='flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm'>
+                  <div>
+                    <p className='font-medium text-slate-900'>
+                      {r.name} ({r.code})
+                    </p>
+                    <p className='text-xs text-slate-400'>{r._id}</p>
+                  </div>
+                  <input
+                    type='checkbox'
+                    checked={!!rolesSelection[r._id]}
+                    onChange={e =>
+                      setRolesSelection(prev => ({
+                        ...prev,
+                        [r._id]: e.target.checked,
+                      }))
+                    }
+                    className='h-4 w-4 rounded border-slate-300 text-orange-500 focus:ring-orange-400'
+                  />
+                </label>
+              ))}
+              {!roles.length && (
+                <p className='text-sm text-slate-500'>Không có role nào trong hệ thống.</p>
+              )}
+            </div>
+
+            <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
+              <button
+                type='button'
+                onClick={() => setShowRolesModal(false)}
+                className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors'
+              >
+                Đóng
+              </button>
+              <button
+                type='button'
+                onClick={async () => {
+                  const currentRoleIds = (rolesUser.roles || []).map(r => r._id);
+                  const selectedIds = Object.entries(rolesSelection)
+                    .filter(([, v]) => v)
+                    .map(([id]) => id);
+                  const toAdd = selectedIds.filter(id => !currentRoleIds.includes(id));
+                  const toRemove = currentRoleIds.filter(id => !selectedIds.includes(id));
+
+                  if (!toAdd.length && !toRemove.length) {
+                    setShowRolesModal(false);
+                    return;
+                  }
+
+                  let message = '';
+                  if (toAdd.length) {
+                    const res = await workflowService.assignUserRoles(rolesUser._id, toAdd);
+                    if (!res.success) {
+                      message = res.message || 'Không thể gán vai trò';
+                    }
+                  }
+                  if (toRemove.length) {
+                    const res = await workflowService.removeUserRoles(rolesUser._id, toRemove);
+                    if (!res.success) {
+                      message = message || res.message || 'Không thể bỏ vai trò';
+                    }
+                  }
+                  if (message) {
+                    setError(message);
+                  } else {
+                    setSuccessMessage('Cập nhật vai trò người dùng thành công.');
+                  }
+                  setShowRolesModal(false);
+                  loadUsers();
+                }}
+                className='rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800'
+              >
+                Lưu phân quyền
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className='flex flex-col gap-4 sm:flex-row'>
         <div className='relative flex-1'>
           <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400' />
@@ -425,6 +766,7 @@ export default function AdminUsersPage() {
               <th className='px-6 py-3'>Vai trò</th>
               <th className='px-6 py-3'>Đơn vị</th>
               <th className='px-6 py-3 text-center'>Trạng thái</th>
+              <th className='px-6 py-3 text-right'>Hành động</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-border'>
@@ -466,6 +808,31 @@ export default function AdminUsersPage() {
                         Ngừng HĐ
                       </span>
                     )}
+                  </td>
+                  <td className='px-6 py-4'>
+                    <div className='flex justify-end gap-2'>
+                      <button
+                        type='button'
+                        onClick={() => openEditUser(user)}
+                        className='rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:bg-slate-100'
+                      >
+                        Sửa
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => openRolesModal(user)}
+                        className='rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:bg-slate-100'
+                      >
+                        Quyền
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => handleDeleteUser(user)}
+                        className='rounded-lg border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50'
+                      >
+                        Xóa
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
