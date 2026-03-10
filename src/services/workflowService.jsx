@@ -256,6 +256,12 @@ export const workflowService = {
 
   // Master/product/reporting
   getItems: params => withResult(() => axiosInstance.get('/items', { params })),
+  getItem: id => withResult(() => axiosInstance.get(`/items/${id}`)),
+  createItem: payload => withResult(() => axiosInstance.post('/items', payload)),
+  updateItem: (id, payload) =>
+    withResult(() => axiosInstance.put(`/items/${id}`, payload)),
+  deleteItem: id =>
+    withResult(() => axiosInstance.delete(`/items/${id}`)),
   getDashboardOverview: params =>
     withResult(() => axiosInstance.get('/dashboard/overview', { params })),
   getPerformanceMetrics: params =>
@@ -263,18 +269,54 @@ export const workflowService = {
 
   // Admin
   getUsers: params => withResult(() => axiosInstance.get('/users', { params })),
+  getDrivers: params =>
+    withResult(() => axiosInstance.get('/users/drivers/list', { params })),
+  getUser: id => withResult(() => axiosInstance.get(`/users/${id}`)),
+  updateUser: (id, payload) =>
+    withResult(() => axiosInstance.put(`/users/${id}`, payload)),
+  deleteUser: id =>
+    withResult(() => axiosInstance.delete(`/users/${id}`)),
+  // Master data
+  getUoms: params =>
+    withResult(() => axiosInstance.get('/master-data/uoms', { params })),
+  getUom: id =>
+    withResult(() => axiosInstance.get(`/master-data/uoms/${id}`)),
+  createUom: payload =>
+    withResult(() => axiosInstance.post('/master-data/uoms', payload)),
+  getCategories: params =>
+    withResult(() => axiosInstance.get('/master-data/categories', { params })),
+  getCategory: id =>
+    withResult(() => axiosInstance.get(`/master-data/categories/${id}`)),
+  createCategory: payload =>
+    withResult(() => axiosInstance.post('/master-data/categories', payload)),
+  getSuppliers: params =>
+    withResult(() => axiosInstance.get('/master-data/suppliers', { params })),
+  getSupplier: id =>
+    withResult(() => axiosInstance.get(`/master-data/suppliers/${id}`)),
+  createSupplier: payload =>
+    withResult(() => axiosInstance.post('/master-data/suppliers', payload)),
   getOrgUnits: params =>
     withResult(() => axiosInstance.get('/master-data/org-units', { params })),
+  createOrgUnit: payload =>
+    withResult(() => axiosInstance.post('/master-data/org-units', payload)),
   getLocations: params =>
     withResult(() => axiosInstance.get('/master-data/locations', { params })),
   getLocation: id =>
     withResult(() => axiosInstance.get(`/master-data/locations/${id}`)),
-  getCategories: params =>
-    withResult(() => axiosInstance.get('/master-data/categories', { params })),
+  createLocation: payload =>
+    withResult(() => axiosInstance.post('/master-data/locations', payload)),
   getRoles: params =>
     withResult(() => axiosInstance.get('/master-data/roles', { params })),
   registerUser: payload =>
     withResult(() => axiosInstance.post('/auth/register', payload)),
+  assignUserRoles: (id, roleIds) =>
+    withResult(() =>
+      axiosInstance.post(`/users/${id}/roles`, { role_ids: roleIds }),
+    ),
+  removeUserRoles: (id, roleIds) =>
+    withResult(() =>
+      axiosInstance.delete(`/users/${id}/roles`, { data: { role_ids: roleIds } }),
+    ),
 };
 
 export default workflowService;
