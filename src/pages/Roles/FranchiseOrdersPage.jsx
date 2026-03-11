@@ -56,8 +56,8 @@ export default function FranchiseOrdersPage() {
   const [newOrder, setNewOrder] = useState({
     order_date: getLocalDateTimeString(),
     is_urgent: false,
-    payment_type: 'CASH',
-    lines: [{ item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
+    payment_type: 'BANK_TRANSFER',
+    lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
   });
 
   const loadOrders = async (page = 1) => {
@@ -113,7 +113,7 @@ export default function FranchiseOrdersPage() {
       setNewOrder(prev => ({
         ...prev,
         order_date: getLocalDateTimeString(),
-        payment_type: prev.payment_type || 'CASH',
+        payment_type: 'BANK_TRANSFER',
       }));
     }
   }, [createOpen]);
@@ -151,7 +151,11 @@ export default function FranchiseOrdersPage() {
     setNewOrder(prev => {
       const lines = [...prev.lines];
       let v = value;
-      if (field === 'qty_ordered' || field === 'unit_price') v = Number(value) || 0;
+      if (field === 'qty_ordered') {
+        v = value === '' ? '' : (Number(value) || 0);
+      } else if (field === 'unit_price') {
+        v = Number(value) || 0;
+      }
       lines[idx] = { ...lines[idx], [field]: v };
       if (field === 'item_id') {
         const it = items.find(i => i._id === value);
@@ -159,12 +163,13 @@ export default function FranchiseOrdersPage() {
           lines[idx].uom_id = it.base_uom_id?._id || '';
           lines[idx].unit_price = it.base_sell_price ?? it.cost_price ?? 0;
           if (DISCRETE_UOMS.includes((it.base_uom_id?.code || '').toUpperCase())) {
-            lines[idx].qty_ordered = Math.max(1, Math.round(lines[idx].qty_ordered));
+            const curQty = lines[idx].qty_ordered;
+            lines[idx].qty_ordered = curQty === '' ? 1 : Math.max(1, Math.round(Number(curQty) || 0));
           }
         }
       }
-      if (field === 'qty_ordered' && isDiscreteUom(lines[idx].item_id)) {
-        lines[idx].qty_ordered = Math.max(1, Math.round(v));
+      if (field === 'qty_ordered' && isDiscreteUom(lines[idx].item_id) && v !== '') {
+        lines[idx].qty_ordered = Math.max(1, Math.round(Number(v) || 0));
       }
       return { ...prev, lines };
     });
@@ -173,7 +178,7 @@ export default function FranchiseOrdersPage() {
   const addLine = () => {
     setNewOrder(prev => ({
       ...prev,
-      lines: [...prev.lines, { item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
+      lines: [...prev.lines, { item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
     }));
   };
 
@@ -234,6 +239,7 @@ export default function FranchiseOrdersPage() {
     setExistingOrderForPayment(null);
     setPendingOrderBody(body);
     setPendingOrderTotal(estimatedTotal);
+    setNewOrder(prev => ({ ...prev, payment_type: 'BANK_TRANSFER' }));
     setCreateOpen(false);
     setConfirmOpen(true);
   };
@@ -282,7 +288,7 @@ export default function FranchiseOrdersPage() {
           order_date: getLocalDateTimeString(),
           is_urgent: false,
           payment_type: 'CASH',
-          lines: [{ item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
+          lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
         });
         setPendingOrderBody(null);
         setPendingOrderTotal(0);
@@ -318,23 +324,9 @@ export default function FranchiseOrdersPage() {
       const orderNo = createdOrder?.order_no || orderId;
       const orderAmount = createdOrder?.total_amount;
 
-      const paymentType = newOrder.payment_type || 'CASH';
+      const paymentType = newOrder.payment_type || 'BANK_TRANSFER';
 
-      // Với tiền mặt: gửi đơn (SUBMITTED) ngay trước khi tạo payment
-      if (paymentType === 'CASH') {
-        const statusRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
-        if (!statusRes.success) {
-          setCreateError(statusRes.message || 'Đơn đã tạo nhưng gửi thất bại. Vui lòng vào Chi tiết đơn để Gửi đơn.');
-          setCreating(false);
-          return;
-        }
-      }
-      await createPaymentForOrder(
-        orderId,
-        orderNo,
-        paymentType,
-        orderAmount
-      );
+      await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
       setCreateError('');
       loadOrders(1).catch(() => { /* danh sách sẽ cập nhật khi user tự refresh */ });
     } catch (err) {
@@ -366,7 +358,7 @@ export default function FranchiseOrdersPage() {
       setNewOrder({
         order_date: getLocalDateTimeString(),
         is_urgent: false,
-        lines: [{ item_id: '', qty_ordered: 1, uom_id: '', unit_price: 0 }],
+        lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
       });
       setSuccess('Đã lưu nháp. Vào Chi tiết đơn và bấm "Gửi đơn" khi sẵn sàng gửi lên bếp trung tâm.');
       setCreateError('');
@@ -409,8 +401,8 @@ export default function FranchiseOrdersPage() {
           ? new Date(fullOrder.order_date).toISOString().slice(0, 16)
           : getLocalDateTimeString(),
         is_urgent: !!fullOrder.is_urgent,
-        // Giữ lựa chọn payment_type hiện tại hoặc mặc định CASH
-        payment_type: prev.payment_type || 'CASH',
+        // Staff luôn sử dụng thanh toán chuyển khoản
+        payment_type: 'BANK_TRANSFER',
         lines: mappedLines.length
           ? mappedLines
           : prev.lines,
@@ -713,7 +705,7 @@ export default function FranchiseOrdersPage() {
               <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             <p className='mb-3 text-sm text-slate-600'>
-              Chọn sản phẩm và số lượng cần đặt. Bấm <strong>Thanh toán</strong> để sang bước xác nhận đơn và chọn hình thức thanh toán. Nếu chưa xong, có thể <strong>Lưu nháp</strong> rồi đặt sau.
+              Chọn sản phẩm và số lượng cần đặt. Bấm <strong>Thanh toán</strong> để sang bước xác nhận đơn và thanh toán chuyển khoản PayOS. Nếu chưa xong, có thể <strong>Lưu nháp</strong> rồi đặt sau.
             </p>
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
 
@@ -764,9 +756,10 @@ export default function FranchiseOrdersPage() {
                         type='number'
                         min={isDiscreteUom(line.item_id) ? 1 : 0.01}
                         step={isDiscreteUom(line.item_id) ? 1 : 0.01}
-                        value={line.qty_ordered}
+                        value={line.qty_ordered === '' || line.qty_ordered == null ? '' : line.qty_ordered}
                         disabled={!line.item_id}
                         onChange={e => handleLineChange(idx, 'qty_ordered', e.target.value)}
+                        placeholder='Nhập số lượng'
                         className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed'
                       />
                     </div>
@@ -784,9 +777,9 @@ export default function FranchiseOrdersPage() {
                         type='number'
                         min={0}
                         value={line.unit_price}
+                        readOnly
                         disabled={!line.item_id}
-                        onChange={e => handleLineChange(idx, 'unit_price', e.target.value)}
-                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed'
+                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 text-sm text-slate-700 disabled:bg-slate-100 disabled:text-slate-400 cursor-not-allowed'
                       />
                     </div>
                     <div className='flex items-center justify-end sm:col-span-1'>
@@ -886,30 +879,12 @@ export default function FranchiseOrdersPage() {
 
               <div>
                 <span className='block text-sm font-medium text-slate-700 mb-1'>Hình thức thanh toán</span>
-                <div className='flex flex-wrap gap-4 text-sm'>
-                  <label className='inline-flex items-center gap-2'>
-                    <input
-                      type='radio'
-                      name='payment_type_confirm'
-                      value='CASH'
-                      checked={newOrder.payment_type === 'CASH'}
-                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
-                    />
-                    <span>Tiền mặt tại quầy</span>
-                  </label>
-                  <label className='inline-flex items-center gap-2'>
-                    <input
-                      type='radio'
-                      name='payment_type_confirm'
-                      value='BANK_TRANSFER'
-                      checked={newOrder.payment_type === 'BANK_TRANSFER'}
-                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
-                    />
-                    <span>Chuyển khoản (PayOS)</span>
-                  </label>
+                <div className='inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700'>
+                  <span className='w-2 h-2 rounded-full bg-emerald-500' />
+                  <span>Chỉ hỗ trợ thanh toán chuyển khoản (PayOS)</span>
                 </div>
                 <p className='mt-1 text-xs text-slate-500'>
-                  Chọn tiền mặt nếu khách thanh toán trực tiếp. Chọn chuyển khoản để được chuyển sang trang thanh toán PayOS.
+                  Nhân viên cửa hàng không sử dụng tiền mặt, tất cả đơn hàng được thanh toán qua chuyển khoản PayOS.
                 </p>
               </div>
 
@@ -937,17 +912,7 @@ export default function FranchiseOrdersPage() {
                           const orderId = existingOrderForPayment._id;
                           const orderNo = existingOrderForPayment.order_no || orderId;
                           const orderAmount = existingOrderForPayment.total_amount || 0;
-                          const paymentType = newOrder.payment_type || 'CASH';
-
-                          // CASH: gửi đơn trước khi tạo payment
-                          if (paymentType === 'CASH') {
-                            const statusRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
-                            if (!statusRes.success) {
-                              setCreateError(statusRes.message || 'Đơn đã tạo nhưng gửi thất bại. Vui lòng thử lại sau.');
-                              setCreating(false);
-                              return;
-                            }
-                          }
+                          const paymentType = newOrder.payment_type || 'BANK_TRANSFER';
 
                           await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
                           setCreateError('');
@@ -1035,19 +1000,6 @@ export default function FranchiseOrdersPage() {
                   }
 
                   setRedirectingToPayOS(true);
-
-                  // Khi staff đã xác nhận thanh toán, lúc này mới gửi đơn (SUBMITTED)
-                  try {
-                    if (pendingPaymentInfo.orderId) {
-                      await workflowService.updateInternalOrderStatus(
-                        pendingPaymentInfo.orderId,
-                        'SUBMITTED'
-                      );
-                    }
-                  } catch (err) {
-                    console.error('Update order status before PayOS redirect failed:', err);
-                    // Không chặn redirect, chỉ log lỗi
-                  }
 
                   window.location.href = url;
                 }}

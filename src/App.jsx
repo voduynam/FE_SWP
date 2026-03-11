@@ -25,8 +25,6 @@ import AlertsDashboardPage from './pages/Roles/AlertsDashboardPage';
 import AdminUsersPage from './pages/Roles/AdminUsersPage';
 import AdminStoresPage from './pages/Roles/AdminStoresPage';
 import AdminSettingsPage from './pages/Roles/AdminSettingsPage';
-import AdminSuppliersPage from './pages/Roles/AdminSuppliersPage';
-import AdminReportsPage from './pages/Roles/AdminReportsPage';
 // Manager pages
 import ManagerProductsPage from './pages/Roles/ManagerProductsPage';
 import ManagerInventoryPage from './pages/Roles/ManagerInventoryPage';
@@ -50,6 +48,8 @@ import SupplyIssuesPage from './pages/Roles/SupplyIssuesPage';
 import DriverDashboard from './pages/Roles/DriverDashboard';
 import DriverShipmentsPage from './pages/Roles/DriverShipmentsPage';
 import Delivery from './pages/Delivery/Delivery';
+import PaymentSuccessPage from './pages/Payment/PaymentSuccessPage';
+import PaymentFailedPage from './pages/Payment/PaymentFailedPage';
 
 
 function AppContent() {
@@ -89,9 +89,8 @@ function AppContent() {
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='users' element={<AdminUsersPage />} />
           <Route path='stores' element={<AdminStoresPage />} />
-          <Route path='suppliers' element={<AdminSuppliersPage />} />
           <Route path='settings' element={<AdminSettingsPage />} />
-          <Route path='reports' element={<AdminReportsPage />} />
+          {/* Trang Nhà cung cấp & Báo cáo hệ thống (Admin) đã được ẩn theo yêu cầu */}
         </Route>
 
         {/* Manager routes */}
@@ -144,6 +143,8 @@ function AppContent() {
       </Route>
 
       <Route path='/login' element={<Login />} />
+      <Route path='/payment-success' element={<PaymentSuccessPage />} />
+      <Route path='/payment-failed' element={<PaymentFailedPage />} />
       {/* TODO: Thêm các auth routes khác */}
       {/* <Route path='/register' element={<Register />} /> */}
       <Route path='*' element={<NotFound />} />

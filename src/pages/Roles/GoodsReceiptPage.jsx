@@ -88,18 +88,16 @@ export default function GoodsReceiptPage() {
     }
   };
 
-  const [shipmentLoadInfo, setShipmentLoadInfo] = useState(null); // { shipped, inTransit, delivered, afterFilter }
+  const [shipmentLoadInfo, setShipmentLoadInfo] = useState(null); // { shipped, inTransit, afterFilter }
   const loadShipmentsForCreate = async () => {
-    const [shippedRes, inTransitRes, deliveredRes, receiptsRes] = await Promise.all([
+    const [shippedRes, inTransitRes, receiptsRes] = await Promise.all([
       workflowService.getShipments({ status: 'SHIPPED', limit: 100 }),
       workflowService.getShipments({ status: 'IN_TRANSIT', limit: 100 }),
-      workflowService.getShipments({ status: 'DELIVERED', limit: 100 }),
       workflowService.getGoodsReceipts({ limit: 500 }),
     ]);
     const shippedList = getShipmentList(shippedRes);
     const inTransitList = getShipmentList(inTransitRes);
-    const deliveredList = getShipmentList(deliveredRes);
-    let list = [...shippedList, ...inTransitList, ...deliveredList];
+    let list = [...shippedList, ...inTransitList];
     const existingShipmentIds = new Set(
       (getReceiptList(receiptsRes) || [])
         .map(r => r.shipment_id?._id ?? r.shipment_id)
@@ -110,7 +108,6 @@ export default function GoodsReceiptPage() {
     setShipmentLoadInfo({
       shipped: shippedList.length,
       inTransit: inTransitList.length,
-      delivered: deliveredList.length,
       afterFilter: list.length,
     });
   };
@@ -223,10 +220,10 @@ export default function GoodsReceiptPage() {
       }
       const sumMismatch = payload.lines.some((l, idx) => {
         const qtyShip = lines[idx]?.qty_ship ?? 0;
-        return l.qty_received + l.qty_rejected > qtyShip;
+        return l.qty_received + l.qty_rejected !== qtyShip;
       });
       if (sumMismatch) {
-        setCreateError('Tổng số lượng nhận + từ chối không được vượt quá số lượng giao của từng dòng.');
+        setCreateError('Tổng số lượng nhận (qty_received) + từ chối (qty_rejected) phải đúng bằng số lượng giao cho từng dòng.');
         setCreating(false);
         return;
       }
@@ -575,21 +572,20 @@ export default function GoodsReceiptPage() {
             {shipmentLoadInfo && shipments.length === 0 && (
               <div className='mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800'>
                 <p className='font-medium'>Không có lô giao hàng để tạo phiếu nhận.</p>
-                <p className='mt-1'>API: SHIPPED={shipmentLoadInfo.shipped}, IN_TRANSIT={shipmentLoadInfo.inTransit}, DELIVERED={shipmentLoadInfo.delivered} → sau lọc: {shipmentLoadInfo.afterFilter} lô.</p>
-                <p className='mt-1 text-amber-600'>Kiểm tra: 1) Driver đã cập nhật trạng thái? 2) Đã tạo phiếu cho lô này? 3) Lô DELIVERED bị từ chối → sửa BE (FLOW3_CHECK.md).</p>
+               
               </div>
             )}
             {createError && (
               <p className='mb-3 text-sm text-red-600'>
                 {createError}
-                {(createError.includes('shipped') || createError.includes('transit')) && ' Nếu lô đã DELIVERED, cần sửa BE (xem FLOW3_CHECK.md).'}
+                {(createError.includes('shipped') || createError.includes('transit')) && ' Nếu lô đã DELIVERED, cần sửa BE .'}
               </p>
             )}
 
             <form onSubmit={submitCreate} className='space-y-4'>
               <div>
                 <label className='block text-sm font-medium text-slate-700'>
-                  Chọn lô giao hàng (SHIPPED / IN_TRANSIT / DELIVERED)
+                  Chọn lô giao hàng 
                 </label>
                 <select
                   value={selectedShipmentId}

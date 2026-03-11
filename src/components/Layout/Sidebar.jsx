@@ -125,21 +125,23 @@ const menuByRole = {
       icon: Store,
       path: "/app/admin/stores",
     },
-    {
-      title: "Nhà cung cấp",
-      icon: Package,
-      path: "/app/admin/suppliers",
-    },
+    // Trang Nhà cung cấp (Admin) tạm thời ẩn
+    // {
+    //   title: "Nhà cung cấp",
+    //   icon: Package,
+    //   path: "/app/admin/suppliers",
+    // },
     {
       title: "Công thức sản xuất",
       icon: ChefHat,
       path: "/app/manager/recipes",
     },
-    {
-      title: "Báo cáo hệ thống",
-      icon: BarChart3,
-      path: "/app/admin/reports",
-    },
+    // Trang Báo cáo hệ thống (Admin) tạm thời ẩn
+    // {
+    //   title: "Báo cáo hệ thống",
+    //   icon: BarChart3,
+    //   path: "/app/admin/reports",
+    // },
     {
       title: "Cảnh báo",
       icon: AlertTriangle,

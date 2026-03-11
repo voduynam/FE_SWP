@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Check, Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 
@@ -101,7 +101,8 @@ export default function CentralProductionPage() {
     const [rRes, iRes, ioRes] = await Promise.all([
       workflowService.getRecipes({ status: 'ACTIVE', limit: 100 }),
       workflowService.getItems({ status: 'ACTIVE', limit: 100 }),
-      workflowService.getInternalOrders({ status: 'PROCESSING', limit: 50 }),
+      // Lấy các đơn hàng đã được phê duyệt hoặc đang xử lý để lập kế hoạch sản xuất
+      workflowService.getInternalOrders({ status: 'APPROVED', limit: 50 }),
     ]);
     setRecipes(getList(rRes));
     const itemList = Array.isArray(iRes?.data) ? iRes.data : (iRes?.data?.data ?? []);
@@ -113,6 +114,17 @@ export default function CentralProductionPage() {
     loadOrders(1);
   }, [statusFilter]);
 
+  const [searchParams] = useSearchParams();
+  const [pendingInternalOrderId, setPendingInternalOrderId] = useState(null);
+
+  useEffect(() => {
+    const ioId = searchParams.get('io');
+    if (ioId) {
+      setPendingInternalOrderId(ioId);
+      setCreateOpen(true);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     if (createOpen) {
       setNewOrder({
@@ -121,9 +133,14 @@ export default function CentralProductionPage() {
         lines: [{ recipe_id: '', item_id: '', planned_qty: 1, uom_id: '' }],
       });
       setSelectedIO(null);
-      loadRecipesAndItems();
+      (async () => {
+        await loadRecipesAndItems();
+        if (pendingInternalOrderId) {
+          handleSelectInternalOrder(pendingInternalOrderId);
+        }
+      })();
     }
-  }, [createOpen]);
+  }, [createOpen, pendingInternalOrderId]);
 
   const loadDetail = async id => {
     setDetailId(id);
