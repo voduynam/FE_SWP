@@ -27,6 +27,9 @@ export default function AdminStoresPage() {
     name: '',
     code: '',
     type: 'STORE',
+    address: '',
+    district: '',
+    city: '',
     status: 'ACTIVE',
   });
 
@@ -396,6 +399,9 @@ export default function AdminStoresPage() {
                   name: orgForm.name.trim(),
                   code: orgForm.code.trim() || undefined,
                   type: orgForm.type,
+                  address: orgForm.address.trim() || undefined,
+                  district: orgForm.district.trim() || undefined,
+                  city: orgForm.city.trim() || undefined,
                   status: orgForm.status,
                 };
                 const res = await workflowService.createOrgUnit(payload);
@@ -403,7 +409,7 @@ export default function AdminStoresPage() {
                   setError(res.message || 'Không thể tạo đơn vị');
                   return;
                 }
-                setOrgForm({ name: '', code: '', type: 'STORE', status: 'ACTIVE' });
+                setOrgForm({ name: '', code: '', type: 'STORE', address: '', district: '', city: '', status: 'ACTIVE' });
                 setShowCreateOrg(false);
                 setSuccess('Tạo đơn vị / cửa hàng mới thành công.');
                 loadStores();
@@ -428,6 +434,40 @@ export default function AdminStoresPage() {
                     onChange={e => setOrgForm(f => ({ ...f, code: e.target.value }))}
                     className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
                   />
+                </div>
+              </div>
+              <div className='space-y-3'>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Địa chỉ</label>
+                  <input
+                    type='text'
+                    value={orgForm.address}
+                    onChange={e => setOrgForm(f => ({ ...f, address: e.target.value }))}
+                    placeholder='Ví dụ: 123 Nguyễn Văn Linh'
+                    className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                  />
+                </div>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                  <div>
+                    <label className='block text-sm font-medium text-slate-700'>Quận / Huyện</label>
+                    <input
+                      type='text'
+                      value={orgForm.district}
+                      onChange={e => setOrgForm(f => ({ ...f, district: e.target.value }))}
+                      placeholder='Ví dụ: Quận 7'
+                      className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                    />
+                  </div>
+                  <div>
+                    <label className='block text-sm font-medium text-slate-700'>Thành phố</label>
+                    <input
+                      type='text'
+                      value={orgForm.city}
+                      onChange={e => setOrgForm(f => ({ ...f, city: e.target.value }))}
+                      placeholder='Ví dụ: TP. Hồ Chí Minh'
+                      className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                    />
+                  </div>
                 </div>
               </div>
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>

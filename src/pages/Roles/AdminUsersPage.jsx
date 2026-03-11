@@ -778,7 +778,7 @@ export default function AdminUsersPage() {
                 <tr key={user._id} className='hover:bg-slate-50 transition-colors'>
                   <td className='px-6 py-4'>
                     <p className='font-medium text-slate-900'>{displayName}</p>
-                    <p className='text-xs text-slate-400'>{user._id}</p>
+                    {/* <p className='text-xs text-slate-400'>{user._id}</p> */}
                   </td>
                   <td className='px-6 py-4'>
                     <p className='text-sm text-slate-800'>{user.email || '-'}</p>

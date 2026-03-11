@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Check, RefreshCcw, Search, X } from 'lucide-react';
 import axiosInstance from '../../utils/axiosInstance';
@@ -15,6 +16,7 @@ const statusLabels = {
 };
 
 export default function CentralOrdersPage() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [search, setSearch] = useState('');
@@ -82,9 +84,11 @@ export default function CentralOrdersPage() {
       setSuccess(`Đơn ${order.order_no || order._id} → ${statusLabels[nextStatus] || nextStatus} thành công.`);
       setDetailOrder(prev => (prev?._id === order._id ? { ...prev, status: nextStatus } : prev));
       await loadOrders();
+      return true;
     } catch (err) {
       console.error(err);
       setSuccess('');
+      return false;
     } finally {
       setActionLoadingId(null);
     }
@@ -220,37 +224,10 @@ export default function CentralOrdersPage() {
                 <td className='px-4 py-3 text-right'>
                   <button
                     onClick={() => loadDetail(order._id)}
-                    className='mr-2 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'
+                    className='rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'
                   >
                     Chi tiết
                   </button>
-                  {order.status === 'SUBMITTED' && (
-                    <>
-                      <button
-                        onClick={() => updateStatus(order, 'APPROVED')}
-                        disabled={actionLoadingId === order._id}
-                        className='mr-2 inline-flex items-center gap-1 rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-60'
-                      >
-                        <Check className='h-3 w-3' /> Phê duyệt
-                      </button>
-                      <button
-                        onClick={() => updateStatus(order, 'CANCELLED')}
-                        disabled={actionLoadingId === order._id}
-                        className='inline-flex items-center gap-1 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-60'
-                      >
-                        <X className='h-3 w-3' /> Từ chối
-                      </button>
-                    </>
-                  )}
-                  {order.status === 'APPROVED' && (
-                    <button
-                      onClick={() => updateStatus(order, 'PROCESSING')}
-                      disabled={actionLoadingId === order._id}
-                      className='inline-flex items-center gap-1 rounded-md bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600 disabled:opacity-60'
-                    >
-                      Bắt đầu xử lý
-                    </button>
-                  )}
                 </td>
               </tr>
             ))}
@@ -313,7 +290,7 @@ export default function CentralOrdersPage() {
                   </table>
                 </div>
                 {detailOrder.status === 'SUBMITTED' && (
-                  <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
+                  <div className='flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4'>
                     <button
                       onClick={() => updateStatus(detailOrder, 'CANCELLED')}
                       disabled={actionLoadingId === detailOrder._id}
@@ -322,22 +299,17 @@ export default function CentralOrdersPage() {
                       Từ chối
                     </button>
                     <button
-                      onClick={() => updateStatus(detailOrder, 'APPROVED')}
+                      onClick={async () => {
+                        const ok = await updateStatus(detailOrder, 'APPROVED');
+                        if (ok) {
+                          navigate(`/app/central/production?io=${detailOrder._id}`);
+                          setDetailId(null);
+                        }
+                      }}
                       disabled={actionLoadingId === detailOrder._id}
                       className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
                     >
-                      Phê duyệt
-                    </button>
-                  </div>
-                )}
-                {detailOrder.status === 'APPROVED' && (
-                  <div className='flex justify-end border-t border-slate-200 pt-4'>
-                    <button
-                      onClick={() => updateStatus(detailOrder, 'PROCESSING')}
-                      disabled={actionLoadingId === detailOrder._id}
-                      className='rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
-                    >
-                      Bắt đầu xử lý
+                      Phê duyệt & lập kế hoạch sản xuất
                     </button>
                   </div>
                 )}

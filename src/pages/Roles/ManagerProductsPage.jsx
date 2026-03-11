@@ -25,6 +25,7 @@ export default function ManagerProductsPage() {
     base_uom_id: '',
     status: 'ACTIVE',
   });
+  const [categoryForm, setCategoryForm] = useState({ name: '', code: '' });
 
   const loadData = async () => {
     setError('');
@@ -142,7 +143,7 @@ export default function ManagerProductsPage() {
         </div>
       )}
 
-      <div className='overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm'>
+          <div className='overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm'>
         <div className='border-b border-slate-200 px-4 py-3 flex items-center justify-between'>
           <div>
             <h2 className='text-sm font-semibold text-slate-900'>Sản phẩm & Categories</h2>
@@ -186,43 +187,100 @@ export default function ManagerProductsPage() {
         </div>
         <div className='overflow-x-auto'>
           {itemTab === 'CATEGORIES' ? (
-            <table className='w-full text-sm'>
-              <thead className='bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                <tr>
-                  <th className='px-4 py-3'>Category</th>
-                  <th className='px-4 py-3'>ID</th>
-                  <th className='px-4 py-3'>Số item</th>
-                  <th className='px-4 py-3'>Danh sách item</th>
-                </tr>
-              </thead>
-              <tbody className='divide-y divide-slate-100'>
-                {loading && (
+            <div className='space-y-4 px-4 py-3'>
+              <form
+                className='grid grid-cols-1 gap-3 sm:grid-cols-4 items-end bg-slate-50 rounded-xl p-3 border border-slate-200'
+                onSubmit={async e => {
+                  e.preventDefault();
+                  setError('');
+                  setSuccess('');
+                  const payload = {
+                    name: categoryForm.name.trim(),
+                    code: categoryForm.code.trim() || undefined,
+                  };
+                  if (!payload.name) {
+                    setError('Tên category không được để trống.');
+                    return;
+                  }
+                  const res = await workflowService.createCategory(payload);
+                  if (!res.success) {
+                    setError(res.message || 'Không thể tạo category');
+                    return;
+                  }
+                  setCategoryForm({ name: '', code: '' });
+                  setSuccess('Tạo category mới thành công.');
+                  loadData();
+                }}
+              >
+                <div className='sm:col-span-2'>
+                  <label className='block text-sm font-medium text-slate-700'>Tên category</label>
+                  <input
+                    type='text'
+                    required
+                    value={categoryForm.name}
+                    onChange={e => setCategoryForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder='Ví dụ: Đồ uống'
+                    className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                  />
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Mã (tùy chọn)</label>
+                  <input
+                    type='text'
+                    value={categoryForm.code}
+                    onChange={e => setCategoryForm(f => ({ ...f, code: e.target.value }))}
+                    placeholder='Ví dụ: BEV'
+                    className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400'
+                  />
+                </div>
+                <div>
+                  <button
+                    type='submit'
+                    className='w-full rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'
+                    disabled={loading}
+                  >
+                    Thêm category
+                  </button>
+                </div>
+              </form>
+              <table className='w-full text-sm'>
+                <thead className='bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                   <tr>
-                    <td colSpan={4} className='px-4 py-6 text-center text-slate-500'>
-                      Đang tải dữ liệu...
-                    </td>
+                    <th className='px-4 py-3'>Category</th>
+                    <th className='px-4 py-3'>ID</th>
+                    <th className='px-4 py-3'>Số item</th>
+                    <th className='px-4 py-3'>Danh sách item</th>
                   </tr>
-                )}
-                {!loading && !categoryRows.length && (
-                  <tr>
-                    <td colSpan={4} className='px-4 py-6 text-center text-slate-400'>
-                      Không có category
-                    </td>
-                  </tr>
-                )}
-                {!loading &&
-                  categoryRows.map(cat => (
-                    <tr key={cat._id} className='hover:bg-slate-50'>
-                      <td className='px-4 py-3 font-medium text-slate-900'>{cat.name || cat._id}</td>
-                      <td className='px-4 py-3 text-slate-600'>{cat._id}</td>
-                      <td className='px-4 py-3 text-slate-600'>{cat.item_count}</td>
-                      <td className='px-4 py-3 text-slate-600'>
-                        {cat.item_names.length ? cat.item_names.join(', ') : '-'}
+                </thead>
+                <tbody className='divide-y divide-slate-100'>
+                  {loading && (
+                    <tr>
+                      <td colSpan={4} className='px-4 py-6 text-center text-slate-500'>
+                        Đang tải dữ liệu...
                       </td>
                     </tr>
-                  ))}
-              </tbody>
-            </table>
+                  )}
+                  {!loading && !categoryRows.length && (
+                    <tr>
+                      <td colSpan={4} className='px-4 py-6 text-center text-slate-400'>
+                        Không có category
+                      </td>
+                    </tr>
+                  )}
+                  {!loading &&
+                    categoryRows.map(cat => (
+                      <tr key={cat._id} className='hover:bg-slate-50'>
+                        <td className='px-4 py-3 font-medium text-slate-900'>{cat.name || cat._id}</td>
+                        <td className='px-4 py-3 text-slate-600'>{cat._id}</td>
+                        <td className='px-4 py-3 text-slate-600'>{cat.item_count}</td>
+                        <td className='px-4 py-3 text-slate-600'>
+                          {cat.item_names.length ? cat.item_names.join(', ') : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <table className='w-full text-sm'>
             <thead className='bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
@@ -260,7 +318,7 @@ export default function ManagerProductsPage() {
                     <tr key={item._id || item.id} className='hover:bg-slate-50'>
                       <td className='px-4 py-3'>
                         <div className='text-sm font-medium text-slate-900'>{item.name || item._id}</div>
-                        <div className='text-xs text-slate-400'>{item._id}</div>
+                        {/* <div className='text-xs text-slate-400'>{item._id}</div> */}
                       </td>
                       <td className='px-4 py-3 text-slate-700'>{item.sku || '-'}</td>
                       <td className='px-4 py-3 text-slate-700'>
