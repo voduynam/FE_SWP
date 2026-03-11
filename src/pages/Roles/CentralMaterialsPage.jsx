@@ -32,6 +32,7 @@ export default function CentralMaterialsPage() {
   const [lots, setLots] = useState([]);
   const [lotPag, setLotPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [lotSearch, setLotSearch] = useState('');
+  const [lotInventoryMap, setLotInventoryMap] = useState({});
 
   // Expiring
   const [expiryAlerts, setExpiryAlerts] = useState([]);
@@ -66,6 +67,32 @@ export default function CentralMaterialsPage() {
         setLots(list);
         const p = raw?.pagination ?? {};
         setLotPag({ page: p.page || page, limit: p.limit || PAGE_SIZE, total: p.total || list.length, pages: p.pages || 1 });
+
+        // FE-only: lấy tồn kho hệ thống cho từng lô để Chef xem nhanh
+        try {
+          const lotIds = list.map(l => l._id).filter(Boolean);
+          if (lotIds.length) {
+            const invMap = {};
+            for (const lotId of lotIds) {
+              const invRes = await workflowService.getInventoryBalances({ lot_id: lotId });
+              if (invRes.success && invRes.data) {
+                const rows = Array.isArray(invRes.data.data)
+                  ? invRes.data.data
+                  : Array.isArray(invRes.data)
+                  ? invRes.data
+                  : [];
+                const totalQty = rows.reduce((sum, r) => sum + (r.qty_on_hand ?? 0), 0);
+                invMap[lotId] = totalQty;
+              }
+            }
+            setLotInventoryMap(invMap);
+          } else {
+            setLotInventoryMap({});
+          }
+        } catch {
+          // Không chặn UI nếu load tồn kho lỗi
+          setLotInventoryMap({});
+        }
       }
     } finally { setLoading(false); }
   };
@@ -248,13 +275,14 @@ export default function CentralMaterialsPage() {
                   <th className='px-4 py-3 font-medium text-slate-600'>Sản phẩm</th>
                   <th className='px-4 py-3 font-medium text-slate-600'>Ngày SX</th>
                   <th className='px-4 py-3 font-medium text-slate-600'>Hạn SD</th>
+                  <th className='px-4 py-3 font-medium text-slate-600'>Tồn kho (hệ thống)</th>
                   <th className='px-4 py-3 font-medium text-slate-600'>Trạng thái</th>
                   <th className='px-4 py-3 font-medium text-slate-600'></th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100'>
-                {loading && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-                {!loading && !filteredLots.length && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Không có lô hàng nào.</td></tr>}
+                {loading && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
+                {!loading && !filteredLots.length && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Không có lô hàng nào.</td></tr>}
                 {!loading && filteredLots.map((lot, idx) => {
                   const isExpired = lot.exp_date && new Date(lot.exp_date) < new Date();
                   const daysLeft = lot.exp_date ? Math.ceil((new Date(lot.exp_date) - new Date()) / 86400000) : null;
@@ -264,6 +292,11 @@ export default function CentralMaterialsPage() {
                       <td className='px-4 py-3 text-slate-700'>{getItemName(lot.item_id)}</td>
                       <td className='px-4 py-3 text-slate-500'>{lot.mfg_date ? new Date(lot.mfg_date).toLocaleDateString('vi-VN') : '-'}</td>
                       <td className='px-4 py-3 text-slate-500'>{lot.exp_date ? new Date(lot.exp_date).toLocaleDateString('vi-VN') : '-'}</td>
+                      <td className='px-4 py-3 text-slate-900'>
+                        {lotInventoryMap[lot._id] != null
+                          ? `${lotInventoryMap[lot._id].toLocaleString('vi-VN')} ${typeof lot.item_id === 'object' ? (lot.item_id.base_uom_id?.code || '') : ''}`
+                          : <span className='text-xs text-slate-400'>Chưa có dữ liệu</span>}
+                      </td>
                       <td className='px-4 py-3'>
                         {isExpired
                           ? <span className='rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700'>Hết hạn</span>

@@ -175,6 +175,11 @@ const menuByRole = {
       path: "/app/manager/inventory",
     },
     {
+      title: "Lịch sử giao hàng",
+      icon: TruckIcon,
+      path: "/app/manager/shipments",
+    },
+    {
       title: "Yêu cầu trả hàng",
       icon: RotateCcw,
       path: "/app/manager/returns",
@@ -209,6 +214,12 @@ const menuByRole = {
       path: "/app/central/production",
     },
     {
+      title: "Yêu cầu trả hàng",
+      icon: RotateCcw,
+      // Dùng chung màn với Manager để duyệt/ xử lý trả hàng
+      path: "/app/manager/returns",
+    },
+    {
       title: "Phiếu giao hàng",
       icon: TruckIcon,
       path: "/app/central/shipments",
@@ -241,6 +252,11 @@ const menuByRole = {
       title: "Điều phối & giao hàng",
       icon: TruckIcon,
       path: "/app/supply/delivery",
+    },
+    {
+      title: "Lịch sử giao hàng",
+      icon: TruckIcon,
+      path: "/app/supply/shipments",
     },
     {
       title: "Xử lý sự cố",

@@ -70,6 +70,7 @@ export default function SupplyDeliveryPage() {
   const [detailRoute, setDetailRoute] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [stopPhotoFiles, setStopPhotoFiles] = useState({});
 
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -192,9 +193,20 @@ export default function SupplyDeliveryPage() {
     if (!detailRoute) return;
     setActionLoading(true);
     try {
-      const res = await workflowService.updateStopStatus(detailRoute._id, stop._id, { status: newStatus });
+      const payload =
+        newStatus === 'COMPLETED'
+          ? { status: newStatus, deliveryPhoto: stopPhotoFiles[stop._id] || undefined }
+          : { status: newStatus };
+      const res = await workflowService.updateStopStatus(detailRoute._id, stop._id, payload);
       if (res.success) {
         setSuccess(`Điểm dừng "${getStoreName(stop.store_org_unit_id)}" → ${STOP_STATUS[newStatus]}`);
+        if (newStatus === 'COMPLETED') {
+          setStopPhotoFiles(prev => {
+            const next = { ...prev };
+            delete next[stop._id];
+            return next;
+          });
+        }
         await loadDetail(detailRoute._id);
       } else {
         alert(res.message || 'Cập nhật điểm dừng thất bại');
@@ -509,12 +521,29 @@ export default function SupplyDeliveryPage() {
                           </div>
                         </div>
                         {detailRoute.status === 'IN_PROGRESS' && stop.status !== 'COMPLETED' && stop.status !== 'SKIPPED' && (
-                          <div className='mt-2 flex gap-2 border-t border-slate-100 pt-2'>
+                          <div className='mt-2 flex flex-col gap-2 border-t border-slate-100 pt-2 sm:flex-row sm:items-center sm:justify-between'>
                             {stop.status === 'PENDING' && (
                               <button disabled={actionLoading} onClick={() => handleUpdateStop(stop, 'ARRIVED')} className='rounded bg-sky-500 px-3 py-1 text-xs text-white hover:bg-sky-600 disabled:opacity-60'>Đã đến</button>
                             )}
                             {stop.status === 'ARRIVED' && (
-                              <button disabled={actionLoading} onClick={() => handleUpdateStop(stop, 'COMPLETED')} className='rounded bg-emerald-500 px-3 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-60'>Hoàn thành</button>
+                              <>
+                                <label className='flex cursor-pointer flex-1 items-center justify-between rounded-lg border border-dashed border-emerald-400 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-100'>
+                                  <div className='flex flex-col'>
+                                    <span className='font-medium'>Ảnh giao hàng tại điểm dừng (tùy chọn)</span>
+                                    <span className='text-[11px] text-emerald-600/80'>Nhấp để chọn file (jpg, png...)</span>
+                                  </div>
+                                  <input
+                                    type='file'
+                                    accept='image/*'
+                                    onChange={e => {
+                                      const file = e.target.files?.[0] || null;
+                                      setStopPhotoFiles(prev => ({ ...prev, [stop._id]: file }));
+                                    }}
+                                    className='hidden'
+                                  />
+                                </label>
+                                <button disabled={actionLoading} onClick={() => handleUpdateStop(stop, 'COMPLETED')} className='rounded bg-emerald-500 px-3 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-60'>Hoàn thành</button>
+                              </>
                             )}
                             {stop.status !== 'COMPLETED' && (
                               <button disabled={actionLoading} onClick={() => handleUpdateStop(stop, 'SKIPPED')} className='rounded border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-60'>Bỏ qua</button>

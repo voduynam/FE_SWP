@@ -32,6 +32,23 @@ function getList(res) {
   return [];
 }
 
+function resolvePhotoUrl(url) {
+  if (!url) return '';
+  // Cloudinary or full URL
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+
+  // Nếu BE lưu đường dẫn tuyệt đối chứa "uploads", cắt lại cho gọn
+  const uploadsIndex = url.toLowerCase().lastIndexOf('uploads');
+  if (uploadsIndex >= 0) {
+    url = url.substring(uploadsIndex);
+  }
+
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+  const apiRoot = apiBase.replace(/\/api\/?$/, '');
+  if (url.startsWith('/')) return `${apiRoot}${url}`;
+  return `${apiRoot}/${url}`;
+}
+
 export default function CentralShipmentsPage() {
   const [shipments, setShipments] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
@@ -45,6 +62,7 @@ export default function CentralShipmentsPage() {
   const [detailShipment, setDetailShipment] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [imageError, setImageError] = useState(false);
 
   // Create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -98,6 +116,7 @@ export default function CentralShipmentsPage() {
     setDetailId(id);
     setDetailShipment(null);
     setDetailError(null);
+    setImageError(false);
     if (!id) return;
     const res = await workflowService.getShipment(id);
     if (res.success && res.data) setDetailShipment(res.data);
@@ -184,6 +203,21 @@ export default function CentralShipmentsPage() {
     };
     loadData();
   }, [createOpen]);
+
+  // Khi đã load chi tiết đơn + danh sách kho cửa hàng, auto chọn Kho nhận theo OrgUnit của đơn
+  useEffect(() => {
+    if (!orderDetail || !toLocations.length) return;
+    if (toLocationId) return; // user đã chọn tay rồi
+    const storeOrgId = orderDetail.store_org_unit_id?._id || orderDetail.store_org_unit_id;
+    if (!storeOrgId) return;
+    const matched = toLocations.find(l => {
+      const orgId = l.org_unit_id?._id || l.org_unit_id;
+      return orgId === storeOrgId;
+    });
+    if (matched) {
+      setToLocationId(matched._id);
+    }
+  }, [orderDetail, toLocations, toLocationId]);
 
   /* ─── When order selected → load detail ─── */
   useEffect(() => {
@@ -556,6 +590,52 @@ export default function CentralShipmentsPage() {
                     </span>
                   </div>
                 </div>
+
+                {detailShipment.delivery_photo_url && (
+                  <div className='rounded-lg border border-emerald-100 bg-emerald-50/60 p-3'>
+                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700'>
+                      Ảnh giao hàng (Proof of Delivery)
+                    </h3>
+                    <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4'>
+                      {!imageError && (
+                        <div className='overflow-hidden rounded-lg border border-emerald-100 bg-white max-w-xs'>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={resolvePhotoUrl(detailShipment.delivery_photo_url)}
+                            alt='Ảnh giao hàng'
+                            className='h-40 w-full object-cover'
+                            onError={e => {
+                              e.currentTarget.style.display = 'none';
+                              setImageError(true);
+                            }}
+                          />
+                        </div>
+                      )}
+                      <div className='text-xs text-emerald-700'>
+                        <p>
+                          Ảnh được tải lên khi Driver xác nhận trạng thái <strong>DELIVERED</strong>.
+                        </p>
+                        {detailShipment.delivery_photo_uploaded_at && (
+                          <p className='mt-1 text-emerald-600/80'>
+                            Thời gian upload:{' '}
+                            {new Date(detailShipment.delivery_photo_uploaded_at).toLocaleString('vi-VN')}
+                          </p>
+                        )}
+                        <p className='mt-1'>
+                          Xem ảnh chứng từ:{' '}
+                          <a
+                            href={resolvePhotoUrl(detailShipment.delivery_photo_url)}
+                            target='_blank'
+                            rel='noreferrer'
+                            className='font-medium underline'
+                          >
+                            Xem ảnh
+                          </a>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Flow guide */}
                 <div className='rounded-lg border border-slate-200 bg-white p-3'>

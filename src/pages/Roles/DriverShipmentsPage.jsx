@@ -45,6 +45,7 @@ export default function DriverShipmentsPage() {
   const [detailId, setDetailId] = useState(null);
   const [detailShipment, setDetailShipment] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [deliveryPhotoFile, setDeliveryPhotoFile] = useState(null);
 
   const loadShipments = async () => {
     setLoading(true);
@@ -83,13 +84,24 @@ export default function DriverShipmentsPage() {
   };
 
   const updateStatus = async (shipment, newStatus) => {
+    if (newStatus === 'DELIVERED' && !deliveryPhotoFile) {
+      alert('Vui lòng chọn ảnh giao hàng trước khi xác nhận đã giao đến.');
+      return;
+    }
     setActionLoadingId(shipment._id);
     setSuccess('');
     try {
-      const res = await workflowService.updateShipmentStatus(shipment._id, newStatus);
+      const payload =
+        newStatus === 'DELIVERED'
+          ? { status: newStatus, deliveryPhoto: deliveryPhotoFile }
+          : newStatus;
+      const res = await workflowService.updateShipmentStatus(shipment._id, payload);
       if (res.success) {
         setSuccess(`Đã cập nhật: ${SHIPMENT_STATUS[newStatus] || newStatus}`);
         setDetailShipment(prev => (prev?._id === shipment._id ? { ...prev, status: newStatus } : prev));
+        if (newStatus === 'DELIVERED') {
+          setDeliveryPhotoFile(null);
+        }
         loadShipments();
       } else {
         alert(res.message || 'Cập nhật thất bại');
@@ -174,11 +186,10 @@ export default function DriverShipmentsPage() {
                 )}
                 {sh.status === 'IN_TRANSIT' && (
                   <button
-                    disabled={actionLoadingId === sh._id}
-                    onClick={() => updateStatus(sh, 'DELIVERED')}
-                    className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
+                    onClick={() => loadDetail(sh._id)}
+                    className='flex-1 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100'
                   >
-                    {actionLoadingId === sh._id ? '...' : 'Đã giao đến'}
+                    Cập nhật / gửi ảnh
                   </button>
                 )}
               </div>
@@ -252,7 +263,7 @@ export default function DriverShipmentsPage() {
                   </div>
                 </div>
 
-                <div className='flex flex-wrap gap-2 border-t border-slate-200 pt-4'>
+                <div className='flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between'>
                   {detailShipment.status === 'SHIPPED' && (
                     <button
                       disabled={actionLoadingId === detailShipment._id}
@@ -263,13 +274,33 @@ export default function DriverShipmentsPage() {
                     </button>
                   )}
                   {detailShipment.status === 'IN_TRANSIT' && (
-                    <button
-                      disabled={actionLoadingId === detailShipment._id}
-                      onClick={() => updateStatus(detailShipment, 'DELIVERED')}
-                      className='inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
-                    >
-                      <CheckCircle className='h-4 w-4' /> Xác nhận đã giao đến
-                    </button>
+                    <>
+                      <label className='flex cursor-pointer flex-1 items-center justify-between rounded-lg border border-dashed border-emerald-400 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-100'>
+                        <div className='flex flex-col text-left'>
+                          <span className='font-medium'>
+                            Ảnh giao hàng {deliveryPhotoFile ? '(đã chọn)' : ''}
+                          </span>
+                          <span className='text-[11px] text-emerald-600/80'>
+                            {deliveryPhotoFile
+                              ? deliveryPhotoFile.name
+                              : 'Nhấp để chọn file (jpg, png...)'}
+                          </span>
+                        </div>
+                        <input
+                          type='file'
+                          accept='image/*'
+                          onChange={e => setDeliveryPhotoFile(e.target.files?.[0] || null)}
+                          className='hidden'
+                        />
+                      </label>
+                      <button
+                        disabled={actionLoadingId === detailShipment._id || !deliveryPhotoFile}
+                        onClick={() => updateStatus(detailShipment, 'DELIVERED')}
+                        className='inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
+                      >
+                        <CheckCircle className='h-4 w-4' /> Xác nhận đã giao đến
+                      </button>
+                    </>
                   )}
                   {detailShipment.status === 'DELIVERED' && (
                     <p className='text-sm font-medium text-emerald-600'>✓ Đã giao thành công</p>

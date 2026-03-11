@@ -98,6 +98,7 @@ function AppContent() {
           <Route path='products' element={<ManagerProductsPage />} />
           <Route path='recipes' element={<RecipesPage />} />
           <Route path='inventory' element={<ManagerInventoryPage />} />
+          <Route path='shipments' element={<CentralShipmentsPage />} />
           <Route path='returns' element={<ManagerReturnRequestPage />} />
           <Route path='reports' element={<ManagerReportsPage />} />
         </Route>
@@ -116,6 +117,7 @@ function AppContent() {
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='orders' element={<SupplyOrdersPage />} />
           <Route path='delivery' element={<SupplyDeliveryPage />} />
+          <Route path='shipments' element={<CentralShipmentsPage />} />
           <Route path='issues' element={<SupplyIssuesPage />} />
         </Route>
 

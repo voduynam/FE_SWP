@@ -125,8 +125,21 @@ export const workflowService = {
     withResult(() => axiosInstance.get(`/shipments/${id}`)),
   createShipment: payload =>
     withResult(() => axiosInstance.post('/shipments', payload)),
-  updateShipmentStatus: (id, status) =>
-    withResult(() => axiosInstance.put(`/shipments/${id}/status`, { status })),
+  updateShipmentStatus: (id, payload) => {
+    const body = typeof payload === 'string' ? { status: payload } : payload || {};
+    const formData = new FormData();
+    if (body.status) {
+      formData.append('status', body.status);
+    }
+    if (body.deliveryPhoto instanceof File) {
+      formData.append('delivery_photo', body.deliveryPhoto);
+    }
+    return withResult(() =>
+      axiosInstance.put(`/shipments/${id}/status`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    );
+  },
   dispatchShipment: id =>
     withResult(() => axiosInstance.put(`/shipments/${id}/dispatch`)),
   getShipmentsPaginated: async params => {
@@ -199,6 +212,31 @@ export const workflowService = {
 
   getDeliveryRoutes: params =>
     withResult(() => axiosInstance.get('/delivery-routes', { params })),
+  getDeliveryRoute: id =>
+    withResult(() => axiosInstance.get(`/delivery-routes/${id}`)),
+  createDeliveryRoute: payload =>
+    withResult(() => axiosInstance.post('/delivery-routes', payload)),
+  addRouteStop: (routeId, payload) =>
+    withResult(() => axiosInstance.post(`/delivery-routes/${routeId}/stops`, payload)),
+  updateRouteStatus: (id, payload) =>
+    withResult(() => axiosInstance.put(`/delivery-routes/${id}/status`, payload)),
+  updateStopStatus: (routeId, stopId, payload) => {
+    const body = payload || {};
+    const formData = new FormData();
+    if (body.status) {
+      formData.append('status', body.status);
+    }
+    if (body.deliveryPhoto instanceof File) {
+      formData.append('delivery_photo', body.deliveryPhoto);
+    }
+    return withResult(() =>
+      axiosInstance.put(
+        `/delivery-routes/${routeId}/stops/${stopId}/status`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      )
+    );
+  },
 
   // Supply coordination
   getConsolidatedOrders: params =>
