@@ -126,6 +126,11 @@ const menuByRole = {
       path: "/app/admin/stores",
     },
     {
+      title: "Nhà cung cấp",
+      icon: Package,
+      path: "/app/admin/suppliers",
+    },
+    {
       title: "Công thức sản xuất",
       icon: ChefHat,
       path: "/app/manager/recipes",

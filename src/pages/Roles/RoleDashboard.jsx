@@ -4,7 +4,7 @@ import ManagerDashboard from './ManagerDashboard';
 import SupplyCoordinatorDashboard from './SupplyCoordinatorDashboard';
 import CentralKitchenDashboard from './CentralKitchenDashboard';
 import FranchiseStoreDashboard from './FranchiseStoreDashboard';
-import DriverDashboard from '../Dashboards/DriverDashboard';
+import DriverDashboard from './DriverDashboard';
 
 const normalizeRoleCode = role => {
   const normalized = String(role || '').trim().toUpperCase().replace(/-/g, '_');

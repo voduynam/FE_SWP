@@ -16,7 +16,7 @@ import RoleProtectedRoute from './components/RoleProtectedRoute';
 import RedirectRoute from './components/RedirectRoute';
 import Layout from './components/Layout/Layout';
 import CkManagerLayout from './components/Layout/CkManagerLayout';
-import Home from './pages/Home/Home';
+// import Home from './pages/Home/Home';
 import Login from './pages/Auth/Login';
 import NotFound from './pages/NotFound/NotFound';
 import RoleDashboard from './pages/Roles/RoleDashboard';
@@ -25,6 +25,7 @@ import AlertsDashboardPage from './pages/Roles/AlertsDashboardPage';
 import AdminUsersPage from './pages/Roles/AdminUsersPage';
 import AdminStoresPage from './pages/Roles/AdminStoresPage';
 import AdminSettingsPage from './pages/Roles/AdminSettingsPage';
+import AdminSuppliersPage from './pages/Roles/AdminSuppliersPage';
 import AdminReportsPage from './pages/Roles/AdminReportsPage';
 // Manager pages
 import ManagerProductsPage from './pages/Roles/ManagerProductsPage';
@@ -46,7 +47,7 @@ import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
 import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
 import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
 import SupplyIssuesPage from './pages/Roles/SupplyIssuesPage';
-import DriverDashboard from './pages/Dashboards/DriverDashboard';
+import DriverDashboard from './pages/Roles/DriverDashboard';
 import DriverShipmentsPage from './pages/Roles/DriverShipmentsPage';
 import Delivery from './pages/Delivery/Delivery';
 
@@ -58,9 +59,9 @@ function AppContent() {
       <Route path='/' element={<RedirectRoute />} />
       
       {/* Khu vực public (trang giới thiệu) - chỉ dùng cho các route khác nếu cần */}
-      <Route path='/home' element={<Layout />}>
+      {/* <Route path='/home' element={<Layout />}>
         <Route index element={<Home />} />
-      </Route>
+      </Route> */}
 
       {/* Khu vực CK Manager với sidebar, yêu cầu đăng nhập + đúng role */}
       <Route
@@ -88,6 +89,7 @@ function AppContent() {
           <Route path='dashboard' element={<RoleDashboard />} />
           <Route path='users' element={<AdminUsersPage />} />
           <Route path='stores' element={<AdminStoresPage />} />
+          <Route path='suppliers' element={<AdminSuppliersPage />} />
           <Route path='settings' element={<AdminSettingsPage />} />
           <Route path='reports' element={<AdminReportsPage />} />
         </Route>
