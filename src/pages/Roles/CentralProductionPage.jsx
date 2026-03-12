@@ -162,6 +162,7 @@ export default function CentralProductionPage() {
       setSelectedIO(null);
       return;
     }
+
     const res = await workflowService.getInternalOrder(orderId);
     if (!res.success || !res.data) return;
     const io = res.data;
@@ -169,12 +170,37 @@ export default function CentralProductionPage() {
 
     const withRecipe = [];
     const skipped = [];
-    ioLines.filter(l => l.item_id).forEach(l => {
+
+    // Helper: luôn đảm bảo lấy đúng công thức ACTIVE từ BE nếu chưa có trong state
+    const getActiveRecipeForItem = async (itemId) => {
+      let recipe = recipes.find(r => (r.item_id?._id ?? r.item_id) === itemId && r.status === 'ACTIVE');
+      if (recipe) return recipe;
+      const rRes = await workflowService.getRecipes({ item_id: itemId, status: 'ACTIVE', limit: 1 });
+      const list = Array.isArray(rRes.data?.data)
+        ? rRes.data.data
+        : Array.isArray(rRes.data)
+          ? rRes.data
+          : [];
+      recipe = list[0];
+      if (recipe) {
+        // cache vào state để lần sau dùng lại
+        setRecipes(prev => {
+          const exists = prev.some(r => r._id === recipe._id);
+          return exists ? prev : [...prev, recipe];
+        });
+      }
+      return recipe || null;
+    };
+
+    for (const l of ioLines.filter(l => l.item_id)) {
       const itemId = l.item_id?._id ?? l.item_id;
       const itemName = l.item_id?.name ?? l.item_id?.sku ?? itemId;
-      const recipe = recipes.find(r => (r.item_id?._id ?? r.item_id) === itemId);
+      const recipe = await getActiveRecipeForItem(itemId);
       if (recipe) {
-        const item = items.find(i => i._id === itemId);
+        const item =
+          typeof l.item_id === 'object'
+            ? l.item_id
+            : items.find(i => i._id === itemId);
         withRecipe.push({
           recipe_id: recipe._id,
           item_id: itemId,
@@ -182,15 +208,30 @@ export default function CentralProductionPage() {
           uom_id: item?.base_uom_id?._id ?? item?.base_uom_id ?? l.uom_id?._id ?? l.uom_id ?? '',
         });
       } else {
-        skipped.push(itemName);
+        skipped.push({ id: itemId, name: itemName });
       }
+    }
+
+    const rawOnly =
+      ioLines.length > 0 &&
+      ioLines.every(l => {
+        const item =
+          typeof l.item_id === 'object'
+            ? l.item_id
+            : items.find(i => i._id === (l.item_id?._id ?? l.item_id));
+        return (item?.item_type || '').toUpperCase() === 'RAW';
+      });
+
+    setSelectedIO({
+      ...io,
+      _skippedItems: skipped.map(s => s.name),
+      _rawOnly: rawOnly,
     });
 
-    setSelectedIO({ ...io, _skippedItems: skipped });
     if (withRecipe.length) {
       setNewOrder(prev => ({ ...prev, lines: withRecipe }));
     } else {
-      // Đơn chỉ có nguyên liệu thô → không cần lệnh sản xuất, bỏ trống lines
+      // Không tự sinh lines nếu không tìm thấy công thức phù hợp
       setNewOrder(prev => ({ ...prev, lines: [] }));
     }
   };
@@ -966,11 +1007,11 @@ export default function CentralProductionPage() {
                     </div>
                     {selectedIO._skippedItems?.length > 0 && (
                       <div className='rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700'>
-                        <strong>Bỏ qua (nguyên liệu thô, không có công thức):</strong> {selectedIO._skippedItems.join(', ')}
-                        <span className='ml-1 text-amber-500'>— Xuất kho trực tiếp qua phiếu giao hàng (Shipment).</span>
+                        <strong>Sản phẩm chưa có công thức sản xuất:</strong> {selectedIO._skippedItems.join(', ')}
+                        <span className='ml-1 text-amber-500'>— Cần tạo công thức trước khi lập kế hoạch sản xuất.</span>
                       </div>
                     )}
-                    {selectedIO._skippedItems?.length > 0 && newOrder.lines.length === 0 && (
+                    {selectedIO._rawOnly && (
                       <div className='mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800'>
                         <p className='font-medium'>Đơn này chỉ gồm nguyên liệu thô — không cần lập kế hoạch sản xuất.</p>
                         <p className='mt-1 text-xs'>Tạo phiếu giao hàng trực tiếp tại trang Phiếu giao hàng để xuất kho cho cửa hàng.</p>
