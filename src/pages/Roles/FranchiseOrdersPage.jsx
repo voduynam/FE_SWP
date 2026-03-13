@@ -15,6 +15,27 @@ const ORDER_STATUS = {
   CANCELLED: 'Đã hủy',
 };
 
+const getStatusClasses = status => {
+  switch (status) {
+    case 'DRAFT':
+      return 'bg-amber-100 text-amber-700';
+    case 'SUBMITTED':
+      return 'bg-sky-100 text-sky-700';
+    case 'APPROVED':
+      return 'bg-indigo-100 text-indigo-700';
+    case 'PROCESSING':
+      return 'bg-blue-100 text-blue-700';
+    case 'SHIPPED':
+      return 'bg-violet-100 text-violet-700';
+    case 'RECEIVED':
+      return 'bg-emerald-100 text-emerald-700';
+    case 'CANCELLED':
+      return 'bg-slate-100 text-slate-600';
+    default:
+      return 'bg-slate-100 text-slate-700';
+  }
+};
+
 const PAGE_SIZE = 10;
 
 /** Trả về ngày giờ hiện tại (local) dạng yyyy-MM-ddThh:mm cho input datetime-local */
@@ -547,12 +568,7 @@ export default function FranchiseOrdersPage() {
                   {o.total_amount != null ? Number(o.total_amount).toLocaleString('vi-VN') + ' đ' : '-'}
                 </td>
                 <td className='px-4 py-3'>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                    o.status === 'RECEIVED' ? 'bg-emerald-100 text-emerald-700' :
-                    o.status === 'DRAFT' ? 'bg-amber-100 text-amber-700' :
-                    o.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' :
-                    'bg-slate-100 text-slate-700'
-                  }`}>
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${getStatusClasses(o.status)}`}>
                     {ORDER_STATUS[o.status] || o.status}
                   </span>
                 </td>
@@ -639,7 +655,9 @@ export default function FranchiseOrdersPage() {
                   <span className='text-slate-500'>Ngày đặt:</span>
                   <span>{detailOrder.order_date ? new Date(detailOrder.order_date).toLocaleString('vi-VN') : '-'}</span>
                   <span className='text-slate-500'>Trạng thái:</span>
-                  <span>{ORDER_STATUS[detailOrder.status] || detailOrder.status}</span>
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${getStatusClasses(detailOrder.status)}`}>
+                    {ORDER_STATUS[detailOrder.status] || detailOrder.status}
+                  </span>
                   <span className='text-slate-500'>Tổng tiền:</span>
                   <span>{detailOrder.total_amount != null ? Number(detailOrder.total_amount).toLocaleString('vi-VN') + ' đ' : '-'}</span>
                 </div>
