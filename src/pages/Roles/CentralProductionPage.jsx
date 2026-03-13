@@ -429,6 +429,11 @@ export default function CentralProductionPage() {
     return DISCRETE_UOMS.includes(code);
   };
 
+  const getOutputLinePlannedQty = () => {
+    const line = detailOrder?.lines?.find(l => l._id === outputForm.prod_order_line_id);
+    return Number(line?.planned_qty) || 0;
+  };
+
   // Khi chọn Dòng sản xuất (đầu ra): tự điền uom_id từ dòng, load lots theo sản phẩm của dòng
   const onOutputLineChange = (lineId) => {
     const line = detailOrder?.lines?.find(l => l._id === lineId);
@@ -559,6 +564,12 @@ export default function CentralProductionPage() {
         alert('Số lượng đầu ra (đơn vị túi/cái) phải là số nguyên lớn hơn 0.');
         return;
       }
+    }
+
+    const plannedQty = getOutputLinePlannedQty();
+    if (plannedQty > 0 && qty > plannedQty) {
+      alert(`Số lượng đầu ra (${qty}) không được lớn hơn số lượng kế hoạch (${plannedQty}).`);
+      return;
     }
     setCreating(true);
     try {
@@ -711,7 +722,7 @@ export default function CentralProductionPage() {
                 </div>
 
                 {/* Quy trình 5 bước – hiển thị bước hiện tại */}
-                <div className='rounded-lg border border-slate-200 bg-white p-3'>
+                {/* <div className='rounded-lg border border-slate-200 bg-white p-3'>
                   <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Quy trình sản xuất</h3>
                   <ol className='space-y-1 text-sm'>
                     <li className={['DRAFT', 'PLANNED', 'IN_PROGRESS', 'DONE'].includes(detailOrder.status) ? 'text-slate-700' : 'text-slate-400'}>1. Lập kế hoạch (PLANNED) — Tạo lệnh với planned_start, planned_end, lines</li>
@@ -720,7 +731,7 @@ export default function CentralProductionPage() {
                     <li className={detailOrder.status === 'IN_PROGRESS' || detailOrder.status === 'DONE' ? 'text-slate-700' : 'text-slate-400'}>4. Ghi nhận sản phẩm đầu ra — POST output (prod_order_line_id, lot_id, qty, uom_id)</li>
                     <li className={detailOrder.status === 'DONE' ? 'text-slate-700' : 'text-slate-400'}>5. Hoàn thành (DONE) — Ghi nhận actual_end</li>
                   </ol>
-                </div>
+                </div> */}
 
                 {/* Nút thao tác theo trạng thái */}
                 {['PLANNED', 'DRAFT'].includes(detailOrder.status) && (
@@ -767,7 +778,7 @@ export default function CentralProductionPage() {
                         <th className='px-3 py-2'>Sản phẩm</th>
                         <th className='px-3 py-2'>Kế hoạch</th>
                         <th className='px-3 py-2'>Thực tế</th>
-                        <th className='px-3 py-2'>Tiêu hao / Đầu ra</th>
+                        <th className='px-3 py-2'>Tiêu hao </th>
                       </tr>
                     </thead>
                     <tbody className='divide-y divide-slate-100'>
@@ -776,7 +787,7 @@ export default function CentralProductionPage() {
                           <td className='px-3 py-2'>{getItemName(line.item_id)}</td>
                           <td className='px-3 py-2'>{line.planned_qty ?? 0}</td>
                           <td className='px-3 py-2'>{line.actual_qty ?? 0}</td>
-                          <td className='px-3 py-2 text-xs'>Tiêu hao: {line.consumption?.length ?? 0} | Đầu ra: {line.output?.length ?? 0}</td>
+                          <td className='px-3 py-2 text-xs'>Tiêu hao: {line.consumption?.length ?? 0} </td>
                         </tr>
                       ))}
                     </tbody>
@@ -914,11 +925,19 @@ export default function CentralProductionPage() {
                           onChange={e => {
                             const v = e.target.value;
                             const num = Number(v);
+                            const planned = getOutputLinePlannedQty();
                             if (isOutputLineDiscreteUom()) {
-                              const rounded = Number.isFinite(num) ? Math.max(1, Math.round(num)) : 1;
+                              let rounded = Number.isFinite(num) ? Math.max(1, Math.round(num)) : 1;
+                              if (planned > 0 && rounded > planned) rounded = planned;
                               setOutputForm(p => ({ ...p, qty: rounded }));
                             } else {
-                              setOutputForm(p => ({ ...p, qty: v }));
+                              let val = num;
+                              if (!Number.isFinite(val) || val <= 0) {
+                                setOutputForm(p => ({ ...p, qty: '' }));
+                                return;
+                              }
+                              if (planned > 0 && val > planned) val = planned;
+                              setOutputForm(p => ({ ...p, qty: val }));
                             }
                           }}
                           className='mt-1 w-full rounded border px-2 py-1 text-sm'

@@ -302,6 +302,14 @@ export const workflowService = {
     withResult(() => axiosInstance.delete(`/items/${id}`)),
   getDashboardOverview: params =>
     withResult(() => axiosInstance.get('/dashboard/overview', { params })),
+  getDashboardOrders: params =>
+    withResult(() => axiosInstance.get('/dashboard/orders', { params })),
+  getDashboardProduction: params =>
+    withResult(() => axiosInstance.get('/dashboard/production', { params })),
+  getDashboardInventory: params =>
+    withResult(() => axiosInstance.get('/dashboard/inventory', { params })),
+  getDashboardShipments: params =>
+    withResult(() => axiosInstance.get('/dashboard/shipments', { params })),
   getPerformanceMetrics: params =>
     withResult(() => axiosInstance.get('/performance-metrics', { params })),
 
