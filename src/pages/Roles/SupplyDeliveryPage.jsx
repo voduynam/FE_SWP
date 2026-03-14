@@ -78,15 +78,13 @@ export default function SupplyDeliveryPage() {
 
   const [form, setForm] = useState({
     route_name: '',
-    driver_name: '',
-    driver_phone: '',
-    vehicle_no: '',
-    vehicle_type: 'TRUCK_1TON',
+    driver_id: '',
     planned_date: new Date().toISOString().slice(0, 10),
   });
   const [stops, setStops] = useState([]);
   const [orgUnits, setOrgUnits] = useState([]);
   const [shipments, setShipments] = useState([]);
+  const [drivers, setDrivers] = useState([]);
 
   const loadRoutes = async (page = 1) => {
     setLoading(true);
@@ -222,20 +220,19 @@ export default function SupplyDeliveryPage() {
     setCreateError('');
     setForm({
       route_name: '',
-      driver_name: '',
-      driver_phone: '',
-      vehicle_no: '',
-      vehicle_type: 'TRUCK_1TON',
+      driver_id: '',
       planned_date: new Date().toISOString().slice(0, 10),
     });
     setStops([]);
     const load = async () => {
-      const [ouRes, shRes] = await Promise.all([
+      const [ouRes, shRes, driversRes] = await Promise.all([
         workflowService.getOrgUnits({ limit: 100 }),
-        workflowService.getShipments({ limit: 100 }),
+        workflowService.getShipments({ limit: 200 }),
+        workflowService.getDrivers({ limit: 100 }),
       ]);
       setOrgUnits(getList(ouRes));
       setShipments(getList(shRes));
+      setDrivers(getList(driversRes));
     };
     load();
   }, [createOpen]);
@@ -276,17 +273,17 @@ export default function SupplyDeliveryPage() {
     setCreateError('');
     try {
       if (!form.route_name.trim()) { setCreateError('Vui lòng nhập tên tuyến.'); setCreating(false); return; }
+      if (!form.driver_id) { setCreateError('Vui lòng chọn tài xế.'); setCreating(false); return; }
       if (!stops.length) { setCreateError('Vui lòng thêm ít nhất 1 điểm dừng.'); setCreating(false); return; }
       const invalidStop = stops.find(s => !s.store_org_unit_id);
       if (invalidStop) { setCreateError('Mỗi điểm dừng phải chọn cửa hàng.'); setCreating(false); return; }
 
       const routeRes = await workflowService.createDeliveryRoute({
         route_name: form.route_name,
-        driver_name: form.driver_name,
-        driver_phone: form.driver_phone,
-        vehicle_no: form.vehicle_no,
-        vehicle_type: form.vehicle_type,
+        driver_id: form.driver_id,
         planned_date: form.planned_date,
+        vehicle_no: '',
+        vehicle_type: 'VAN',
       });
 
       if (!routeRes.success) {
@@ -572,7 +569,7 @@ export default function SupplyDeliveryPage() {
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
 
             <form onSubmit={handleSubmitCreate} className='space-y-4'>
-              {/* Route info */}
+              {/* Route info: 2 dropdowns per plan – PICKED shipments in stops below; driver here */}
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Tên tuyến *</label>
@@ -582,22 +579,13 @@ export default function SupplyDeliveryPage() {
                   <label className='block text-sm font-medium text-slate-700'>Ngày kế hoạch *</label>
                   <input type='date' value={form.planned_date} onChange={e => setForm(f => ({ ...f, planned_date: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required />
                 </div>
-                <div>
-                  <label className='block text-sm font-medium text-slate-700'>Tên tài xế</label>
-                  <input value={form.driver_name} onChange={e => setForm(f => ({ ...f, driver_name: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' />
-                </div>
-                <div>
-                  <label className='block text-sm font-medium text-slate-700'>SĐT tài xế</label>
-                  <input value={form.driver_phone} onChange={e => setForm(f => ({ ...f, driver_phone: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' />
-                </div>
-                <div>
-                  <label className='block text-sm font-medium text-slate-700'>Biển số xe</label>
-                  <input value={form.vehicle_no} onChange={e => setForm(f => ({ ...f, vehicle_no: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' />
-                </div>
-                <div>
-                  <label className='block text-sm font-medium text-slate-700'>Loại xe</label>
-                  <select value={form.vehicle_type} onChange={e => setForm(f => ({ ...f, vehicle_type: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'>
-                    {Object.entries(VEHICLE_TYPES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                <div className='sm:col-span-2'>
+                  <label className='block text-sm font-medium text-slate-700'>Tài xế *</label>
+                  <select value={form.driver_id} onChange={e => setForm(f => ({ ...f, driver_id: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required>
+                    <option value=''>-- Chọn tài xế --</option>
+                    {drivers.map(d => (
+                      <option key={d._id} value={d._id}>{d.full_name || d.username || d._id}{d.phone ? ` (${d.phone})` : ''}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -636,18 +624,18 @@ export default function SupplyDeliveryPage() {
                         <input type='datetime-local' value={stop.estimated_departure} onChange={e => updateStop(idx, 'estimated_departure', e.target.value)} className='mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm' />
                       </div>
                     </div>
-                    {/* Shipment selection */}
+                    {/* Shipment selection – only PICKED per plan */}
                     <div>
-                      <label className='block text-xs text-slate-500'>Lô hàng giao tại điểm này</label>
+                      <label className='block text-xs text-slate-500'>Lô hàng giao tại điểm này (chỉ phiếu PICKED)</label>
                       <div className='mt-1 flex flex-wrap gap-1'>
-                        {shipments.filter(s => ['DRAFT', 'PICKED', 'SHIPPED', 'IN_TRANSIT'].includes(s.status)).map(sh => (
+                        {shipments.filter(s => s.status === 'PICKED').map(sh => (
                           <label key={sh._id} className={`inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-xs ${stop.shipment_ids.includes(sh._id) ? 'border-orange-300 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                             <input type='checkbox' className='sr-only' checked={stop.shipment_ids.includes(sh._id)} onChange={() => toggleShipmentInStop(idx, sh._id)} />
                             {sh.shipment_no || sh._id}
                           </label>
                         ))}
-                        {!shipments.filter(s => ['DRAFT', 'PICKED', 'SHIPPED', 'IN_TRANSIT'].includes(s.status)).length && (
-                          <span className='text-xs text-slate-400'>Không có shipment khả dụng</span>
+                        {!shipments.filter(s => s.status === 'PICKED').length && (
+                          <span className='text-xs text-slate-400'>Không có phiếu PICKED</span>
                         )}
                       </div>
                     </div>

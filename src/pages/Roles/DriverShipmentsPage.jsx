@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, MapPin, RefreshCcw, CheckCircle, ArrowRight } from 'lucide-react';
+import { Truck, MapPin, RefreshCcw, CheckCircle, ArrowRight, History } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
 const SHIPMENT_STATUS = {
   DRAFT: 'Nháp',
@@ -38,6 +39,23 @@ function getItemName(obj) {
   return obj;
 }
 
+function buildShipmentToRouteId(myRoutesList) {
+  const map = {};
+  if (!Array.isArray(myRoutesList)) return map;
+  myRoutesList.forEach((route) => {
+    const routeId = route._id;
+    const stops = route.stops || [];
+    stops.forEach((stop) => {
+      const ids = stop.shipment_ids || [];
+      ids.forEach((s) => {
+        const sid = typeof s === 'object' ? s._id : s;
+        if (sid) map[sid] = routeId;
+      });
+    });
+  });
+  return map;
+}
+
 export default function DriverShipmentsPage() {
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -46,27 +64,64 @@ export default function DriverShipmentsPage() {
   const [detailShipment, setDetailShipment] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [deliveryPhotoFile, setDeliveryPhotoFile] = useState(null);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState('');
+  const [shipmentToRouteId, setShipmentToRouteId] = useState({});
+  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
+  const [deliveredShipments, setDeliveredShipments] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (!deliveryPhotoFile) {
+      setPreviewPhotoUrl('');
+      return;
+    }
+    const url = URL.createObjectURL(deliveryPhotoFile);
+    setPreviewPhotoUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [deliveryPhotoFile]);
 
   const loadShipments = async () => {
     setLoading(true);
     setSuccess('');
     try {
-      const [shippedRes, transitRes] = await Promise.all([
+      const [shippedRes, transitRes, myRoutesRes] = await Promise.all([
         workflowService.getShipmentsPaginated({ status: 'SHIPPED', limit: PAGE_SIZE }),
         workflowService.getShipmentsPaginated({ status: 'IN_TRANSIT', limit: PAGE_SIZE }),
+        workflowService.getMyDeliveryRoutes({ limit: 50 }),
       ]);
       const shipped = getList(shippedRes);
       const transit = getList(transitRes);
       const combined = [...shipped, ...transit].sort((a, b) => new Date(b.ship_date || 0) - new Date(a.ship_date || 0));
       setShipments(combined);
+      const myRoutes = Array.isArray(myRoutesRes?.data)
+        ? myRoutesRes.data
+        : Array.isArray(myRoutesRes?.data?.data)
+          ? myRoutesRes.data.data
+          : getList(myRoutesRes);
+      setShipmentToRouteId(buildShipmentToRouteId(myRoutes));
     } catch {
       setShipments([]);
+      setShipmentToRouteId({});
     } finally {
       setLoading(false);
     }
   };
 
+  const loadDeliveredShipments = async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await workflowService.getShipmentsPaginated({ status: 'DELIVERED', limit: PAGE_SIZE });
+      const list = getList(res);
+      setDeliveredShipments(list.sort((a, b) => new Date(b.delivery_photo_uploaded_at || b.updatedAt || 0) - new Date(a.delivery_photo_uploaded_at || a.updatedAt || 0)));
+    } catch {
+      setDeliveredShipments([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => { loadShipments(); }, []);
+  useEffect(() => { if (activeTab === 'history') loadDeliveredShipments(); }, [activeTab]);
 
   useEffect(() => {
     if (success) {
@@ -74,6 +129,12 @@ export default function DriverShipmentsPage() {
       return () => clearTimeout(t);
     }
   }, [success]);
+
+  const closeDetail = () => {
+    setDetailId(null);
+    setDetailShipment(null);
+    setDeliveryPhotoFile(null);
+  };
 
   const loadDetail = async (id) => {
     setDetailId(id);
@@ -90,13 +151,25 @@ export default function DriverShipmentsPage() {
     }
     setActionLoadingId(shipment._id);
     setSuccess('');
+    const routeId = shipmentToRouteId[shipment._id];
     try {
+      if (newStatus === 'IN_TRANSIT' && routeId) {
+        const routeRes = await workflowService.updateRouteStatus(routeId, { status: 'IN_PROGRESS' });
+        if (!routeRes.success) {
+          alert(routeRes.message || 'Cập nhật tuyến thất bại');
+          setActionLoadingId(null);
+          return;
+        }
+      }
       const payload =
         newStatus === 'DELIVERED'
           ? { status: newStatus, deliveryPhoto: deliveryPhotoFile }
           : newStatus;
       const res = await workflowService.updateShipmentStatus(shipment._id, payload);
       if (res.success) {
+        if (newStatus === 'DELIVERED' && routeId) {
+          await workflowService.updateRouteStatus(routeId, { status: 'COMPLETED' });
+        }
         setSuccess(`Đã cập nhật: ${SHIPMENT_STATUS[newStatus] || newStatus}`);
         setDetailShipment(prev => (prev?._id === shipment._id ? { ...prev, status: newStatus } : prev));
         if (newStatus === 'DELIVERED') {
@@ -129,13 +202,65 @@ export default function DriverShipmentsPage() {
             Xem lô đang cần giao, cập nhật trạng thái vận chuyển và xác nhận đã giao đến.
           </p>
         </div>
-        <button onClick={() => loadShipments()} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
-          <RefreshCcw className='h-4 w-4' /> Làm mới
-        </button>
+        <div className='flex flex-wrap items-center gap-2'>
+          <div className='flex rounded-lg border border-slate-200 p-0.5'>
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium ${activeTab === 'active' ? 'bg-slate-200 text-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              Đang giao
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${activeTab === 'history' ? 'bg-slate-200 text-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              <History className='h-4 w-4' /> Lịch sử đã giao
+            </button>
+          </div>
+          <button onClick={() => activeTab === 'active' ? loadShipments() : loadDeliveredShipments()} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
+            <RefreshCcw className='h-4 w-4' /> Làm mới
+          </button>
+        </div>
       </div>
 
-      {loading && <p className='text-sm text-slate-500'>Đang tải...</p>}
-      {!loading && shipments.length === 0 && (
+      {activeTab === 'history' && (
+        <>
+          {historyLoading && <p className='text-sm text-slate-500'>Đang tải lịch sử...</p>}
+          {!historyLoading && deliveredShipments.length === 0 && (
+            <div className='rounded-xl border border-slate-200 bg-slate-50/50 py-16 text-center'>
+              <History className='mx-auto h-16 w-16 text-slate-300' />
+              <p className='mt-4 text-slate-600'>Chưa có lịch sử giao hàng</p>
+              <p className='mt-1 text-sm text-slate-500'>Các lô đã xác nhận giao đến sẽ hiển thị tại đây</p>
+            </div>
+          )}
+          {!historyLoading && deliveredShipments.length > 0 && (
+            <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+              {deliveredShipments.map(sh => (
+                <div key={sh._id} className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
+                  <div className='mb-2 flex items-start justify-between'>
+                    <p className='font-semibold text-slate-900'>{sh.shipment_no || sh._id}</p>
+                    <span className='inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700'>Đã giao</span>
+                  </div>
+                  <p className='text-xs text-slate-500'>
+                    Ngày giao: {sh.delivery_photo_uploaded_at ? new Date(sh.delivery_photo_uploaded_at).toLocaleString('vi-VN') : (sh.updatedAt ? new Date(sh.updatedAt).toLocaleString('vi-VN') : '-')}
+                  </p>
+                  {sh.delivery_photo_url ? (
+                    <div className='mt-3 rounded-lg border border-slate-200 p-2'>
+                      <img src={resolvePhotoUrl(sh.delivery_photo_url)} alt='Ảnh giao hàng' className='h-24 w-full rounded object-cover' onError={e => { e.target.style.display = 'none'; }} />
+                      <a href={resolvePhotoUrl(sh.delivery_photo_url)} target='_blank' rel='noopener noreferrer' className='mt-1 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-800'>Xem ảnh</a>
+                    </div>
+                  ) : (
+                    <p className='mt-2 text-xs text-slate-400'>Không có ảnh</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'active' && loading && <p className='text-sm text-slate-500'>Đang tải...</p>}
+      {activeTab === 'active' && !loading && shipments.length === 0 && (
         <div className='rounded-xl border border-slate-200 bg-slate-50/50 py-16 text-center'>
           <Truck className='mx-auto h-16 w-16 text-slate-300' />
           <p className='mt-4 text-slate-600'>Không có lô nào đang chờ giao</p>
@@ -143,7 +268,7 @@ export default function DriverShipmentsPage() {
         </div>
       )}
 
-      {!loading && shipments.length > 0 && (
+      {activeTab === 'active' && !loading && shipments.length > 0 && (
         <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
           {shipments.map(sh => (
             <div
@@ -181,7 +306,7 @@ export default function DriverShipmentsPage() {
                     onClick={() => updateStatus(sh, 'IN_TRANSIT')}
                     className='flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60'
                   >
-                    {actionLoadingId === sh._id ? '...' : 'Đang giao'}
+                    {actionLoadingId === sh._id ? '...' : 'Nhận đơn'}
                   </button>
                 )}
                 {sh.status === 'IN_TRANSIT' && (
@@ -200,11 +325,11 @@ export default function DriverShipmentsPage() {
 
       {/* Detail Modal */}
       {detailId && createPortal(
-        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => setDetailId(null)}>
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={closeDetail}>
           <div className='w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
             <div className='mb-4 flex items-center justify-between'>
               <h2 className='text-lg font-semibold text-slate-900'>Chi tiết lô giao hàng</h2>
-              <button onClick={() => setDetailId(null)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+              <button onClick={closeDetail} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {!detailShipment && <p className='text-sm text-slate-500'>Đang tải...</p>}
             {detailShipment && (
@@ -270,7 +395,7 @@ export default function DriverShipmentsPage() {
                       onClick={() => updateStatus(detailShipment, 'IN_TRANSIT')}
                       className='inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60'
                     >
-                      <ArrowRight className='h-4 w-4' /> Đang vận chuyển
+                      <ArrowRight className='h-4 w-4' /> Nhận đơn
                     </button>
                   )}
                   {detailShipment.status === 'IN_TRANSIT' && (
@@ -293,6 +418,12 @@ export default function DriverShipmentsPage() {
                           className='hidden'
                         />
                       </label>
+                      {previewPhotoUrl && (
+                        <div className='rounded-lg border border-emerald-200 bg-white p-2'>
+                          <p className='mb-1 text-xs font-medium text-emerald-700'>Preview ảnh trước khi gửi</p>
+                          <img src={previewPhotoUrl} alt='Preview giao hàng' className='max-w-[200px] rounded border border-slate-200 object-cover' />
+                        </div>
+                      )}
                       <button
                         disabled={actionLoadingId === detailShipment._id || !deliveryPhotoFile}
                         onClick={() => updateStatus(detailShipment, 'DELIVERED')}

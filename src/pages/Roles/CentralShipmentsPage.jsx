@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 
@@ -49,11 +50,15 @@ function resolvePhotoUrl(url) {
   return `${apiRoot}/${url}`;
 }
 
+const VALID_STATUSES = ['ALL', 'DRAFT', 'PICKED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'];
+
 export default function CentralShipmentsPage() {
+  const [searchParams] = useSearchParams();
+  const statusFromUrl = searchParams.get('status');
   const [shipments, setShipments] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [loading, setLoading] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState(() => (VALID_STATUSES.includes(statusFromUrl) ? statusFromUrl : 'ALL'));
   const [search, setSearch] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -108,6 +113,11 @@ export default function CentralShipmentsPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const s = searchParams.get('status');
+    if (s && VALID_STATUSES.includes(s) && s !== statusFilter) setStatusFilter(s);
+  }, [searchParams]);
 
   useEffect(() => { loadShipments(1); }, [statusFilter]);
 
@@ -426,7 +436,7 @@ export default function CentralShipmentsPage() {
 
       const res = await workflowService.createShipment(payload);
       if (!res.success) {
-        setCreateError(res.message || 'Tạo lô giao hàng thất bại');
+        setCreateError(res.message || 'Tạo phiếu giao hàng thất bại');
         setCreating(false);
         return;
       }
@@ -481,12 +491,12 @@ export default function CentralShipmentsPage() {
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Giao hàng</h1>
           <p className='mt-1 text-sm text-slate-500'>
-            Tạo lô giao hàng từ đơn hàng đã duyệt, chọn lô (lot) cho từng sản phẩm và theo dõi trạng thái giao.
+            Tạo phiếu giao hàng từ đơn hàng đã duyệt (chọn đơn, kho xuất/nhận, lot); khi chưa có phiếu cho đơn thì dùng nút bên dưới.
           </p>
         </div>
         <div className='flex gap-2'>
           <button onClick={() => setCreateOpen(true)} className='inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'>
-            <Plus className='h-4 w-4' /> Tạo lô giao hàng
+            <Plus className='h-4 w-4' /> Tạo phiếu giao hàng
           </button>
           <button onClick={() => loadShipments(1)} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
             <RefreshCcw className='h-4 w-4' /> Làm mới
@@ -716,7 +726,7 @@ export default function CentralShipmentsPage() {
         <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setCreateOpen(false)}>
           <div className='w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
             <div className='mb-4 flex items-center justify-between'>
-              <h2 className='text-lg font-semibold text-slate-900'>Tạo lô giao hàng</h2>
+              <h2 className='text-lg font-semibold text-slate-900'>Tạo phiếu giao hàng</h2>
               <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
@@ -854,7 +864,7 @@ export default function CentralShipmentsPage() {
                   disabled={creating || lotsLoading || !selectedOrderId || orderDetailLoading || shipLines.length === 0}
                   className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
                 >
-                  {creating ? 'Đang tạo...' : 'Tạo lô giao hàng'}
+                  {creating ? 'Đang tạo...' : 'Tạo phiếu giao hàng'}
                 </button>
               </div>
             </form>

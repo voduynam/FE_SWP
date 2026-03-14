@@ -212,6 +212,8 @@ export const workflowService = {
 
   getDeliveryRoutes: params =>
     withResult(() => axiosInstance.get('/delivery-routes', { params })),
+  getMyDeliveryRoutes: params =>
+    withResult(() => axiosInstance.get('/delivery-routes/my-routes/list', { params })),
   getDeliveryRoute: id =>
     withResult(() => axiosInstance.get(`/delivery-routes/${id}`)),
   createDeliveryRoute: payload =>
