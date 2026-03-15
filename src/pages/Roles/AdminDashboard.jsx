@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ClipboardList, Package, RefreshCcw, TruckIcon, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ComposedChart, Line } from 'recharts';
 import { ChartContainer, ChartTooltipContent } from '../../components/ui/chart';
 import StatCard from '../../components/ui/StatCard';
 import StatusBadge from '../../components/ui/StatusBadges';
@@ -73,6 +73,8 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [paymentView, setPaymentView] = useState('day'); // day | month | year
+  const [profitStats, setProfitStats] = useState(null);
+  const [profitView, setProfitView] = useState('day'); // day | week | month
 
   const loadData = async () => {
     setLoading(true);
@@ -87,6 +89,7 @@ export default function AdminDashboard() {
       invDashRes,
       shipDashRes,
       paymentsRes,
+      profitRes,
     ] = await Promise.all([
       workflowService.getDashboardOverview({}),
       workflowService.getInternalOrders({ limit: 8 }),
@@ -97,6 +100,7 @@ export default function AdminDashboard() {
       workflowService.getDashboardInventory({}),
       workflowService.getDashboardShipments({}),
       paymentService.getAllPayments({ limit: 10 }),
+      workflowService.getDashboardProfit({ group_by: profitView }),
     ]);
 
     const failedSources = [];
@@ -133,8 +137,22 @@ export default function AdminDashboard() {
       const rows = Array.isArray(p?.payments) ? p.payments : [];
       setPayments(rows.slice(0, 8));
     }
+    if (profitRes.success) setProfitStats(profitRes.data);
     setLoading(false);
   };
+
+  const isFirstProfitView = useRef(true);
+  useEffect(() => {
+    if (isFirstProfitView.current) {
+      isFirstProfitView.current = false;
+      return;
+    }
+    let cancelled = false;
+    workflowService.getDashboardProfit({ group_by: profitView }).then(res => {
+      if (!cancelled && res.success) setProfitStats(res.data);
+    });
+    return () => { cancelled = true; };
+  }, [profitView]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -257,6 +275,28 @@ export default function AdminDashboard() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([, v]) => v);
   }, [ordersStats, paymentView]);
+
+  const formatVnd = n => (n ?? 0).toLocaleString('vi-VN') + ' đ';
+
+  const profitChartData = useMemo(() => {
+    const raw = Array.isArray(profitStats?.trend) ? profitStats.trend : [];
+    if (!raw.length) return [];
+    return [...raw]
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(r => ({
+        period: r.date,
+        revenue: Number(r.revenue ?? 0) || 0,
+        cost: Number(r.cost ?? 0) || 0,
+        profit: Number(r.profit ?? 0) || 0,
+        margin: Number(r.margin ?? 0) || 0,
+      }));
+  }, [profitStats]);
+
+  const profitSummary = profitStats?.summary || {};
+  const topProfitItems = useMemo(
+    () => Array.isArray(profitStats?.top_profit_items) ? profitStats.top_profit_items.slice(0, 5) : [],
+    [profitStats]
+  );
 
   const renderBarSeries = (series, colorClass = 'bg-orange-500') => {
     if (!series.length) {
@@ -478,6 +518,108 @@ export default function AdminDashboard() {
               Tổng doanh thu: {revenueChartData.reduce((sum, s) => sum + (s.amount || 0), 0).toLocaleString('vi-VN')} đ
             </div>
           </>
+        )}
+      </div>
+
+      {/* Lợi nhuận (Doanh thu − Chi phí) */}
+      <div className='rounded-xl border border-border bg-card p-5 shadow-md'>
+        <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+          <div>
+            <h3 className='font-semibold text-slate-900'>Lợi nhuận (Doanh thu − Chi phí)</h3>
+            <p className='text-xs text-muted-foreground'>Thống kê từ đơn hàng đã giao / đã nhận</p>
+          </div>
+          <div className='inline-flex rounded-full bg-slate-100 p-0.5 text-xs font-medium text-slate-600'>
+            <button
+              type='button'
+              onClick={() => setProfitView('day')}
+              className={`rounded-full px-3 py-1 ${profitView === 'day' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-900'}`}
+            >
+              Theo ngày
+            </button>
+            <button
+              type='button'
+              onClick={() => setProfitView('week')}
+              className={`rounded-full px-3 py-1 ${profitView === 'week' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-900'}`}
+            >
+              Theo tuần
+            </button>
+            <button
+              type='button'
+              onClick={() => setProfitView('month')}
+              className={`rounded-full px-3 py-1 ${profitView === 'month' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-900'}`}
+            >
+              Theo tháng
+            </button>
+          </div>
+        </div>
+
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+          <div className='rounded-lg bg-emerald-50 p-3'>
+            <p className='text-xs font-medium text-emerald-700'>Doanh thu</p>
+            <p className='mt-0.5 text-lg font-bold text-emerald-800'>{formatVnd(profitSummary.total_revenue)}</p>
+          </div>
+          <div className='rounded-lg bg-amber-50 p-3'>
+            <p className='text-xs font-medium text-amber-700'>Chi phí</p>
+            <p className='mt-0.5 text-lg font-bold text-amber-800'>{formatVnd(profitSummary.total_cost)}</p>
+          </div>
+          <div className='rounded-lg bg-teal-50 p-3'>
+            <p className='text-xs font-medium text-teal-700'>Lợi nhuận</p>
+            <p className='mt-0.5 text-lg font-bold text-teal-800'>{formatVnd(profitSummary.total_profit)}</p>
+          </div>
+          <div className='rounded-lg bg-sky-50 p-3'>
+            <p className='text-xs font-medium text-sky-700'>Biên lợi nhuận</p>
+            <p className='mt-0.5 text-lg font-bold text-sky-800'>{profitSummary.profit_margin_percent ?? 0}%</p>
+          </div>
+        </div>
+
+        {!profitChartData.length ? (
+          <p className='py-8 text-center text-sm text-muted-foreground'>Chưa có dữ liệu lợi nhuận theo kỳ.</p>
+        ) : (
+          <ChartContainer
+            config={{
+              revenue: { label: 'Doanh thu', color: 'hsl(160 84% 39%)' },
+              cost: { label: 'Chi phí', color: 'hsl(38 92% 50%)' },
+              profit: { label: 'Lợi nhuận', color: 'hsl(173 80% 40%)' },
+            }}
+            className='mt-4 h-[280px] w-full'
+          >
+            <ComposedChart data={profitChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray='3 3' className='stroke-muted' />
+              <XAxis dataKey='period' tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis
+                tick={{ fontSize: 10 }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={v => `${(v / 1e6).toFixed(0)}M`}
+              />
+              <Tooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={value =>
+                      [typeof value === 'number' ? (value ?? 0).toLocaleString('vi-VN') + ' đ' : value]}
+                  />
+                }
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey='revenue' fill='#10b981' radius={[4, 4, 0, 0]} name='Doanh thu' />
+              <Bar dataKey='cost' fill='#f59e0b' radius={[4, 4, 0, 0]} name='Chi phí' />
+              <Line type='monotone' dataKey='profit' stroke='#0d9488' strokeWidth={2} dot={{ r: 3 }} name='Lợi nhuận' />
+            </ComposedChart>
+          </ChartContainer>
+        )}
+
+        {topProfitItems.length > 0 && (
+          <div className='mt-4 border-t border-slate-100 pt-4'>
+            <h4 className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Top sản phẩm lợi nhuận</h4>
+            <div className='space-y-2'>
+              {topProfitItems.map((item, idx) => (
+                <div key={item.item_id || idx} className='flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2'>
+                  <span className='truncate text-sm font-medium text-slate-800'>{item.item_name || item.item_sku || '—'}</span>
+                  <span className='text-sm font-semibold text-teal-600'>{formatVnd(item.total_profit)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
