@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, MapPin, Package, PlusCircle, RefreshCcw, Search, Store as StoreIcon, X } from 'lucide-react';
+import { Download, MapPin, Package, Pencil, PlusCircle, RefreshCcw, Search, Store as StoreIcon, Trash2, X } from 'lucide-react';
 import StatusBadge from '../../components/ui/StatusBadges';
 import { workflowService } from '../../services/workflowService';
 
@@ -23,6 +23,11 @@ export default function AdminStoresPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showCreateOrg, setShowCreateOrg] = useState(false);
+  const [showEditOrg, setShowEditOrg] = useState(false);
+  const [editingOrgId, setEditingOrgId] = useState(null);
+  const [editOrgLoading, setEditOrgLoading] = useState(false);
+  const [showDeleteOrg, setShowDeleteOrg] = useState(false);
+  const [deleteTargetOrg, setDeleteTargetOrg] = useState(null);
   const [orgForm, setOrgForm] = useState({
     name: '',
     code: '',
@@ -94,6 +99,58 @@ export default function AdminStoresPage() {
   useEffect(() => {
     if (activeTab === 'locations') loadLocations();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!showEditOrg || !editingOrgId) return;
+    let cancelled = false;
+    (async () => {
+      setEditOrgLoading(true);
+      const res = await workflowService.getOrgUnit(editingOrgId);
+      if (!cancelled && res.success && res.data) {
+        const d = res.data;
+        setOrgForm({
+          name: d.name || '',
+          code: d.code || '',
+          type: (d.type || 'STORE').toUpperCase(),
+          address: d.address || '',
+          district: d.district || '',
+          city: d.city || '',
+          status: (d.status || 'ACTIVE').toUpperCase(),
+        });
+      }
+      if (!cancelled) setEditOrgLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [showEditOrg, editingOrgId]);
+
+  const openEditOrg = store => {
+    setEditingOrgId(store._id);
+    setShowEditOrg(true);
+    setError('');
+  };
+
+  const openDeleteOrg = store => {
+    setDeleteTargetOrg(store);
+    setShowDeleteOrg(true);
+    setError('');
+  };
+
+  const handleDeleteOrg = async () => {
+    if (!deleteTargetOrg?._id) return;
+    const id = deleteTargetOrg._id;
+    setError('');
+    const res = await workflowService.deleteOrgUnit(id);
+    if (!res.success) {
+      setError(res.message || 'Không thể xóa đơn vị');
+      return;
+    }
+    setShowDeleteOrg(false);
+    setDeleteTargetOrg(null);
+    setSuccess('Đã xóa đơn vị thành công.');
+    loadStores();
+    loadOrgUnits();
+    if (activeTab === 'locations') loadLocations();
+  };
 
   useEffect(() => {
     if (!success) return;
@@ -291,7 +348,25 @@ export default function AdminStoresPage() {
                       <p className='text-sm text-muted-foreground'>{store.code || '-'}</p>
                     </div>
                   </div>
-                  <StatusBadge status={(store.status || '').toLowerCase()} />
+                  <div className='flex items-center gap-2'>
+                    <button
+                      type='button'
+                      onClick={() => openEditOrg(store)}
+                      className='rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-orange-600'
+                      title='Sửa đơn vị'
+                    >
+                      <Pencil className='h-4 w-4' />
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => openDeleteOrg(store)}
+                      className='rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600'
+                      title='Xóa đơn vị'
+                    >
+                      <Trash2 className='h-4 w-4' />
+                    </button>
+                    <StatusBadge status={(store.status || '').toLowerCase()} />
+                  </div>
                 </div>
 
                 <div className='text-sm text-muted-foreground'>
@@ -371,6 +446,151 @@ export default function AdminStoresPage() {
         </>
       )}
 
+      {showEditOrg && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          onClick={() => { setShowEditOrg(false); setEditingOrgId(null); }}
+        >
+          <div
+            className='w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center justify-between'>
+              <h2 className='text-lg font-semibold text-slate-900'>Cập nhật đơn vị / cửa hàng</h2>
+              <button
+                type='button'
+                onClick={() => { setShowEditOrg(false); setEditingOrgId(null); }}
+                className='rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600'
+              >
+                <X className='h-5 w-5' />
+              </button>
+            </div>
+            {editOrgLoading ? (
+              <p className='py-6 text-center text-slate-500'>Đang tải...</p>
+            ) : (
+              <form
+                className='space-y-4'
+                onSubmit={async e => {
+                  e.preventDefault();
+                  if (!editingOrgId) return;
+                  setError('');
+                  const payload = {
+                    code: orgForm.code.trim() || undefined,
+                    name: orgForm.name.trim(),
+                    address: orgForm.address.trim() || undefined,
+                    district: orgForm.district.trim() || undefined,
+                    city: orgForm.city.trim() || undefined,
+                    status: orgForm.status,
+                  };
+                  const res = await workflowService.updateOrgUnit(editingOrgId, payload);
+                  if (!res.success) {
+                    setError(res.message || 'Không thể cập nhật đơn vị');
+                    return;
+                  }
+                  setShowEditOrg(false);
+                  setEditingOrgId(null);
+                  setSuccess('Cập nhật đơn vị thành công.');
+                  loadStores();
+                  loadOrgUnits();
+                }}
+              >
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                  <div>
+                    <label className='block text-sm font-medium text-slate-700'>Tên đơn vị</label>
+                    <input
+                      type='text'
+                      required
+                      value={orgForm.name}
+                      onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))}
+                      className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                    />
+                  </div>
+                  <div>
+                    <label className='block text-sm font-medium text-slate-700'>Mã (tùy chọn)</label>
+                    <input
+                      type='text'
+                      value={orgForm.code}
+                      onChange={e => setOrgForm(f => ({ ...f, code: e.target.value }))}
+                      className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                    />
+                  </div>
+                </div>
+                <div className='space-y-3'>
+                  <div>
+                    <label className='block text-sm font-medium text-slate-700'>Địa chỉ</label>
+                    <input
+                      type='text'
+                      value={orgForm.address}
+                      onChange={e => setOrgForm(f => ({ ...f, address: e.target.value }))}
+                      placeholder='Ví dụ: 123 Nguyễn Văn Linh'
+                      className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                    />
+                  </div>
+                  <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+                    <div>
+                      <label className='block text-sm font-medium text-slate-700'>Quận / Huyện</label>
+                      <input
+                        type='text'
+                        value={orgForm.district}
+                        onChange={e => setOrgForm(f => ({ ...f, district: e.target.value }))}
+                        placeholder='Ví dụ: Quận 7'
+                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                      />
+                    </div>
+                    <div>
+                      <label className='block text-sm font-medium text-slate-700'>Thành phố</label>
+                      <input
+                        type='text'
+                        value={orgForm.city}
+                        onChange={e => setOrgForm(f => ({ ...f, city: e.target.value }))}
+                        placeholder='Ví dụ: TP. Hồ Chí Minh'
+                        className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Loại</label>
+                  <input
+                    type='text'
+                    value={orgForm.type}
+                    readOnly
+                    className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500'
+                  />
+                  <p className='mt-0.5 text-xs text-slate-400'>Không thể đổi loại khi cập nhật</p>
+                </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Trạng thái</label>
+                  <select
+                    value={orgForm.status}
+                    onChange={e => setOrgForm(f => ({ ...f, status: e.target.value }))}
+                    className='mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400'
+                  >
+                    <option value='ACTIVE'>ACTIVE</option>
+                    <option value='INACTIVE'>INACTIVE</option>
+                  </select>
+                </div>
+                <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
+                  <button
+                    type='button'
+                    onClick={() => { setShowEditOrg(false); setEditingOrgId(null); }}
+                    className='rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type='submit'
+                    className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600'
+                  >
+                    Lưu thay đổi
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {showCreateOrg && (
         <div
           className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
@@ -413,6 +633,7 @@ export default function AdminStoresPage() {
                 setShowCreateOrg(false);
                 setSuccess('Tạo đơn vị / cửa hàng mới thành công.');
                 loadStores();
+                loadOrgUnits();
               }}
             >
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
@@ -607,6 +828,44 @@ export default function AdminStoresPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showDeleteOrg && deleteTargetOrg && (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          onClick={() => { setShowDeleteOrg(false); setDeleteTargetOrg(null); }}
+        >
+          <div
+            className='w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center gap-3 text-red-600'>
+              <div className='flex h-10 w-10 items-center justify-center rounded-full bg-red-100'>
+                <Trash2 className='h-5 w-5' />
+              </div>
+              <h2 className='text-lg font-semibold text-slate-900'>Xóa đơn vị</h2>
+            </div>
+            <p className='mb-6 text-sm text-slate-600'>
+              Bạn có chắc muốn xóa đơn vị <strong>{deleteTargetOrg.name || deleteTargetOrg.code || deleteTargetOrg._id}</strong>? Hành động này không thể hoàn tác.
+            </p>
+            <div className='flex justify-end gap-2'>
+              <button
+                type='button'
+                onClick={() => { setShowDeleteOrg(false); setDeleteTargetOrg(null); }}
+                className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
+              >
+                Hủy
+              </button>
+              <button
+                type='button'
+                onClick={handleDeleteOrg}
+                className='rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600'
+              >
+                Xóa
+              </button>
+            </div>
           </div>
         </div>
       )}
