@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
 const SHIPMENT_STATUS = {
   DRAFT: 'Nháp',
@@ -30,30 +31,33 @@ function getList(res) {
   if (!res?.success) return [];
   if (Array.isArray(res.data)) return res.data;
   if (Array.isArray(res.data?.data)) return res.data.data;
+  if (Array.isArray(res.data?.items)) return res.data.items;
   return [];
 }
 
-function resolvePhotoUrl(url) {
-  if (!url) return '';
-  // Cloudinary or full URL
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-
-  // Nếu BE lưu đường dẫn tuyệt đối chứa "uploads", cắt lại cho gọn
-  const uploadsIndex = url.toLowerCase().lastIndexOf('uploads');
-  if (uploadsIndex >= 0) {
-    url = url.substring(uploadsIndex);
-  }
-
-  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-  const apiRoot = apiBase.replace(/\/api\/?$/, '');
-  if (url.startsWith('/')) return `${apiRoot}${url}`;
-  return `${apiRoot}/${url}`;
+/** Lấy mảng org units từ response getOrgUnits (nhiều dạng: getList, .data, .data.data, .data.items) */
+function getOrgUnitList(res) {
+  const list = getList(res);
+  if (list.length) return list;
+  const d = res?.data;
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d?.data)) return d.data;
+  if (Array.isArray(d?.items)) return d.items;
+  return [];
 }
+
+/** Location kho cửa hàng do seed tạo (org_store_q1 + loc_str_q1). Dùng làm option tổng hợp khi GET locations không trả kho cửa hàng. */
+const SEED_STORE_LOCATION = {
+  _id: 'loc_str_q1',
+  name: 'Kho Q1',
+  code: 'WH_STR_Q1',
+  org_unit_id: 'org_store_q1',
+};
 
 const VALID_STATUSES = ['ALL', 'DRAFT', 'PICKED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'];
 
 export default function CentralShipmentsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const statusFromUrl = searchParams.get('status');
   const [shipments, setShipments] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
@@ -68,6 +72,8 @@ export default function CentralShipmentsPage() {
   const [detailError, setDetailError] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [imageError, setImageError] = useState(false);
+  /** Order ids (internal_order_id) có lệnh sản xuất DONE — dùng để chỉ hiện nút "Chuyển sang Đã lấy hàng" với phiếu DRAFT đã sản xuất */
+  const [doneProductionOrderIds, setDoneProductionOrderIds] = useState(() => new Set());
 
   // Create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -89,16 +95,20 @@ export default function CentralShipmentsPage() {
   const [lotsByItemId, setLotsByItemId] = useState({});
   const [lotsLoading, setLotsLoading] = useState(false);
 
-  /* ─── Load shipment list ─── */
+  /* ─── Load shipment list + danh sách đơn đã sản xuất (DONE). Sync chạy song song, không chặn list. ─── */
   const loadShipments = async (page = 1) => {
     setLoading(true);
     setSuccess('');
     try {
-      const res = await workflowService.getShipmentsPaginated({
-        page,
-        limit: PAGE_SIZE,
-        ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
-      });
+      const [res, poRes] = await Promise.all([
+        workflowService.getShipmentsPaginated({
+          page,
+          limit: PAGE_SIZE,
+          ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
+        }),
+        workflowService.getProductionOrders({ status: 'DONE', limit: 500 }),
+        workflowService.syncShipmentsPickedFromProduction().catch(() => ({})),
+      ]);
       if (res.success && res.data) {
         const list = Array.isArray(res.data.data) ? res.data.data : [];
         setShipments(list);
@@ -107,8 +117,32 @@ export default function CentralShipmentsPage() {
       } else {
         setShipments([]);
       }
+      let ids = new Set();
+      try {
+        const poList = Array.isArray(poRes?.data) ? poRes.data : (Array.isArray(poRes?.data?.data) ? poRes.data.data : []);
+        poList.forEach(po => {
+          const id = po?.internal_order_id ?? po?.order_id;
+          if (id) ids.add(String(id));
+        });
+      } catch (_) {
+        // Bỏ qua nếu parse production orders lỗi
+      }
+      setDoneProductionOrderIds(ids);
+
+      const list = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
+      const getShipmentOrderId = (sh) => String(sh?.order_id?._id ?? sh?.order_id ?? '');
+      const toAutoPick = list.filter(sh => sh?.status === 'DRAFT' && ids.has(getShipmentOrderId(sh)));
+      if (toAutoPick.length > 0) {
+        const toAutoPickIds = new Set(toAutoPick.map(sh => sh._id));
+        Promise.all(toAutoPick.map(sh => workflowService.updateShipmentStatus(sh._id, 'PICKED')))
+          .then(() => {
+            setShipments(prev => prev.map(sh => (toAutoPickIds.has(sh._id) ? { ...sh, status: 'PICKED' } : sh)));
+          })
+          .catch(() => {});
+      }
     } catch {
       setShipments([]);
+      setDoneProductionOrderIds(new Set());
     } finally {
       setLoading(false);
     }
@@ -120,6 +154,22 @@ export default function CentralShipmentsPage() {
   }, [searchParams]);
 
   useEffect(() => { loadShipments(1); }, [statusFilter]);
+
+  /* ─── Mở modal tạo phiếu với đơn đã chọn khi vào trang bằng link từ duyệt đơn ─── */
+  useEffect(() => {
+    const create = searchParams.get('create');
+    const orderId = searchParams.get('orderId');
+    if (create === '1' && orderId) {
+      setCreateOpen(true);
+      setSelectedOrderId(orderId);
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.delete('create');
+        next.delete('orderId');
+        return next;
+      }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   /* ─── Detail ─── */
   const loadDetail = async id => {
@@ -176,35 +226,65 @@ export default function CentralShipmentsPage() {
 
   /* ─── Search / filter ─── */
   const filteredShipments = useMemo(() => {
+    const list = Array.isArray(shipments) ? shipments : [];
     const s = (search || '').toLowerCase();
-    return shipments.filter(sh => {
-      const no = sh.shipment_no || sh._id || '';
-      const orderNo = sh.order_id?.order_no || sh.order_id || '';
-      return !s || no.toLowerCase().includes(s) || String(orderNo).toLowerCase().includes(s);
+    return list.filter(sh => {
+      const no = sh?.shipment_no || sh?._id || '';
+      const orderNo = sh?.order_id?.order_no || sh?.order_id || '';
+      return !s || String(no).toLowerCase().includes(s) || String(orderNo).toLowerCase().includes(s);
     });
   }, [shipments, search]);
 
-  /* ─── Create: load eligible orders + locations ─── */
+  /* ─── Create: kho xuất = KITCHEN; kho nhận = kho KITCHEN + kho STORE (gọi rõ theo org), bỏ trùng _id.
+      Cần BE getLocations: khi có org_unit_id thì trả kho thuộc org đó (CHEF/Supply xem được kho cửa hàng).
+      Nếu BE luôn filter theo user org thì kho cửa hàng sẽ không bao giờ hiện. ─── */
   useEffect(() => {
     if (!createOpen) return;
     setCreateError('');
-    setSelectedOrderId('');
     setOrderDetail(null);
     setShipLines([]);
     setLotsByItemId({});
     setCreateDataLoading(true);
     const loadData = async () => {
       try {
-        const [approvedRes, processingRes, locKitchenRes, locStoreRes] = await Promise.all([
+        // Gọi seed trước, lưu response để merge kho cửa hàng (created.locations) vào dropdown Kho nhận
+        const seedRes = await workflowService.seedStoreLocations();
+        const seedLocs = Array.isArray(seedRes?.data?.locations) ? seedRes.data.locations : [];
+        // Chỉ gọi getLocations KHÔNG truyền org_unit_id → BE trả về tất cả kho (bếp + cửa hàng). status=ACTIVE đồng bộ với API.
+        const [approvedRes, processingRes, orgKitchenRes, orgStoreRes, allLocsRes, shipmentsRes] = await Promise.all([
           workflowService.getInternalOrders({ status: 'APPROVED', limit: 100 }),
           workflowService.getInternalOrders({ status: 'PROCESSING', limit: 100 }),
-          workflowService.getLocations({ org_unit_type: 'KITCHEN', limit: 100 }),
-          workflowService.getLocations({ org_unit_type: 'STORE', limit: 100 }),
+          workflowService.getOrgUnits({ type: 'KITCHEN', limit: 100 }),
+          workflowService.getOrgUnits({ type: 'STORE', limit: 100 }),
+          workflowService.getLocations({ status: 'ACTIVE', limit: 1000 }),
+          workflowService.getShipmentsPaginated({ limit: 200 }),
         ]);
         const combinedOrders = [...getList(approvedRes), ...getList(processingRes)];
-        setOrders(combinedOrders);
-        setFromLocations(getList(locKitchenRes));
-        setToLocations(getList(locStoreRes));
+        let orderIdsWithShipment = new Set();
+        try {
+          const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
+          const shipList = Array.isArray(shipData) ? shipData : [];
+          orderIdsWithShipment = new Set(shipList.map(s => String(s?.order_id?._id ?? s?.order_id)).filter(Boolean));
+        } catch (_) {
+          // Bỏ qua nếu parse shipments lỗi
+        }
+        const ordersWithoutShipment = combinedOrders.filter(o => !orderIdsWithShipment.has(String(o._id)));
+        setOrders(ordersWithoutShipment);
+        const kitchenOrgs = getList(orgKitchenRes);
+        const fromLocs = [];
+        for (const org of kitchenOrgs) {
+          const res = await workflowService.getLocations({ org_unit_id: org._id, limit: 100 });
+          fromLocs.push(...getList(res));
+        }
+        setFromLocations(fromLocs);
+        const byId = new Map();
+        fromLocs.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+        getList(allLocsRes).forEach(l => { if (l && l._id) byId.set(l._id, l); });
+        seedLocs.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+        const storeOrgs = getOrgUnitList(orgStoreRes);
+        const hasStoreQ1 = storeOrgs.some(o => (o?._id ?? o?.id) === 'org_store_q1');
+        if (hasStoreQ1) byId.set(SEED_STORE_LOCATION._id, { ...SEED_STORE_LOCATION, org_unit_id: storeOrgs.find(o => (o?._id ?? o?.id) === 'org_store_q1') || SEED_STORE_LOCATION.org_unit_id });
+        setToLocations(Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       } catch (e) {
         setCreateError(e?.message || 'Không tải được đơn hàng hoặc danh sách kho.');
       } finally {
@@ -434,13 +514,19 @@ export default function CentralShipmentsPage() {
         lines: linesToSend,
       };
 
+      if (!payload.from_location_id || !payload.to_location_id) {
+        setCreateError('Vui lòng chọn đủ kho xuất và kho nhận.');
+        setCreating(false);
+        return;
+      }
+
       const res = await workflowService.createShipment(payload);
       if (!res.success) {
         setCreateError(res.message || 'Tạo phiếu giao hàng thất bại');
         setCreating(false);
         return;
       }
-      setCreateOpen(false);
+      closeCreateModal();
       setSuccess('Đã tạo lô giao hàng thành công. Đơn hàng sẽ tự động chuyển trạng thái SHIPPED.');
       loadShipments(1);
     } catch (err) {
@@ -449,6 +535,13 @@ export default function CentralShipmentsPage() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const closeCreateModal = () => {
+    setCreateOpen(false);
+    setSelectedOrderId('');
+    setFromLocationId('');
+    setToLocationId('');
   };
 
   const getItemName = obj => {
@@ -546,9 +639,21 @@ export default function CentralShipmentsPage() {
                   </span>
                 </td>
                 <td className='px-4 py-3 text-right'>
-                  <button onClick={() => loadDetail(sh._id)} className='rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'>
-                    Chi tiết
-                  </button>
+                  <div className='flex items-center justify-end gap-1'>
+                    <button onClick={() => loadDetail(sh._id)} className='rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'>
+                      Chi tiết
+                    </button>
+                    {sh.status === 'DRAFT' && doneProductionOrderIds.has(String(sh.order_id?._id ?? sh.order_id)) && (
+                      <button
+                        disabled={actionLoadingId === sh._id}
+                        onClick={() => updateStatus(sh, 'PICKED')}
+                        className='rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60'
+                        title='Đơn đã sản xuất xong; đánh dấu đã lấy hàng'
+                      >
+                        {actionLoadingId === sh._id ? 'Đang xử lý...' : 'Chuyển sang Đã lấy hàng'}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -601,51 +706,55 @@ export default function CentralShipmentsPage() {
                   </div>
                 </div>
 
-                {detailShipment.delivery_photo_url && (
-                  <div className='rounded-lg border border-emerald-100 bg-emerald-50/60 p-3'>
-                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700'>
-                      Ảnh giao hàng (Proof of Delivery)
-                    </h3>
-                    <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4'>
-                      {!imageError && (
-                        <div className='overflow-hidden rounded-lg border border-emerald-100 bg-white max-w-xs'>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={resolvePhotoUrl(detailShipment.delivery_photo_url)}
-                            alt='Ảnh giao hàng'
-                            className='h-40 w-full object-cover'
-                            onError={e => {
-                              e.currentTarget.style.display = 'none';
-                              setImageError(true);
-                            }}
-                          />
-                        </div>
-                      )}
-                      <div className='text-xs text-emerald-700'>
-                        <p>
-                          Ảnh được tải lên khi Driver xác nhận trạng thái <strong>DELIVERED</strong>.
-                        </p>
-                        {detailShipment.delivery_photo_uploaded_at && (
-                          <p className='mt-1 text-emerald-600/80'>
-                            Thời gian upload:{' '}
-                            {new Date(detailShipment.delivery_photo_uploaded_at).toLocaleString('vi-VN')}
-                          </p>
+                {(() => {
+                  const photoUrl = resolvePhotoUrl(detailShipment.delivery_photo_url);
+                  if (!photoUrl) return null;
+                  return (
+                    <div className='rounded-lg border border-emerald-100 bg-emerald-50/60 p-3'>
+                      <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700'>
+                        Ảnh giao hàng (Proof of Delivery)
+                      </h3>
+                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4'>
+                        {!imageError && (
+                          <div className='overflow-hidden rounded-lg border border-emerald-100 bg-white max-w-xs'>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={photoUrl}
+                              alt='Ảnh giao hàng'
+                              className='h-40 w-full object-cover'
+                              onError={e => {
+                                e.currentTarget.style.display = 'none';
+                                setImageError(true);
+                              }}
+                            />
+                          </div>
                         )}
-                        <p className='mt-1'>
-                          Xem ảnh chứng từ:{' '}
-                          <a
-                            href={resolvePhotoUrl(detailShipment.delivery_photo_url)}
-                            target='_blank'
-                            rel='noreferrer'
-                            className='font-medium underline'
-                          >
-                            Xem ảnh
-                          </a>
-                        </p>
+                        <div className='text-xs text-emerald-700'>
+                          <p>
+                            Ảnh được tải lên khi Driver xác nhận trạng thái <strong>DELIVERED</strong>.
+                          </p>
+                          {detailShipment.delivery_photo_uploaded_at && (
+                            <p className='mt-1 text-emerald-600/80'>
+                              Thời gian upload:{' '}
+                              {new Date(detailShipment.delivery_photo_uploaded_at).toLocaleString('vi-VN')}
+                            </p>
+                          )}
+                          <p className='mt-1'>
+                            Xem ảnh chứng từ:{' '}
+                            <a
+                              href={photoUrl}
+                              target='_blank'
+                              rel='noreferrer'
+                              className='font-medium underline'
+                            >
+                              Xem ảnh
+                            </a>
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Flow guide */}
                 <div className='rounded-lg border border-slate-200 bg-white p-3'>
@@ -723,11 +832,11 @@ export default function CentralShipmentsPage() {
 
       {/* ─── Create Modal ─── */}
       {createOpen && createPortal(
-        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setCreateOpen(false)}>
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && closeCreateModal()}>
           <div className='w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
             <div className='mb-4 flex items-center justify-between'>
               <h2 className='text-lg font-semibold text-slate-900'>Tạo phiếu giao hàng</h2>
-              <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+              <button onClick={() => !creating && closeCreateModal()} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
             {createDataLoading && <p className='mb-3 text-sm text-slate-500'>Đang tải đơn hàng và danh sách kho...</p>}
@@ -736,7 +845,7 @@ export default function CentralShipmentsPage() {
               {/* Select order */}
               <div>
                 <label className='block text-sm font-medium text-slate-700'>
-                  Chọn đơn hàng ({ORDER_STATUS_FOR_SHIPMENT.join(' / ')})
+                  Chọn đơn hàng ({ORDER_STATUS_FOR_SHIPMENT.join(' / ')} — chỉ đơn chưa có phiếu giao)
                 </label>
                 <select
                   value={selectedOrderId}
@@ -752,7 +861,7 @@ export default function CentralShipmentsPage() {
                     </option>
                   ))}
                 </select>
-                {!createDataLoading && orders.length === 0 && <p className='mt-1 text-xs text-amber-600'>Chưa có đơn hàng APPROVED hoặc PROCESSING.</p>}
+                {!createDataLoading && orders.length === 0 && <p className='mt-1 text-xs text-amber-600'>Không có đơn APPROVED/PROCESSING nào chưa có phiếu giao hàng.</p>}
               </div>
 
               {/* Locations: kho xuất = KITCHEN, kho nhận = STORE */}
@@ -858,7 +967,7 @@ export default function CentralShipmentsPage() {
               )}
 
               <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
-                <button type='button' disabled={creating} onClick={() => setCreateOpen(false)} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
+                <button type='button' disabled={creating} onClick={closeCreateModal} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
                 <button
                   type='submit'
                   disabled={creating || lotsLoading || !selectedOrderId || orderDetailLoading || shipLines.length === 0}

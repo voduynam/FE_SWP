@@ -131,17 +131,24 @@ export const workflowService = {
     if (body.status) {
       formData.append('status', body.status);
     }
-    if (body.deliveryPhoto instanceof File) {
-      formData.append('delivery_photo', body.deliveryPhoto);
+    const photo = body.deliveryPhoto;
+    if (photo instanceof File) {
+      formData.append('delivery_photo', photo);
+    } else if (photo && typeof photo === 'object' && (photo instanceof Blob || (photo.type && photo.type.startsWith('image/')))) {
+      const name = photo.name || `delivery_${Date.now()}.jpg`;
+      formData.append('delivery_photo', photo, name);
     }
+    // Content-Type: false → axios không gửi header, browser đặt multipart/form-data + boundary (bắt buộc cho upload file)
     return withResult(() =>
       axiosInstance.put(`/shipments/${id}/status`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': false },
       })
     );
   },
   dispatchShipment: id =>
     withResult(() => axiosInstance.put(`/shipments/${id}/dispatch`)),
+  syncShipmentsPickedFromProduction: () =>
+    withResult(() => axiosInstance.post('/shipments/sync-picked-from-production')),
   getShipmentsPaginated: async params => {
     try {
       const response = await axiosInstance.get('/shipments', { params });
@@ -228,14 +235,18 @@ export const workflowService = {
     if (body.status) {
       formData.append('status', body.status);
     }
-    if (body.deliveryPhoto instanceof File) {
-      formData.append('delivery_photo', body.deliveryPhoto);
+    const photo = body.deliveryPhoto;
+    if (photo instanceof File) {
+      formData.append('delivery_photo', photo);
+    } else if (photo && typeof photo === 'object' && (photo instanceof Blob || (photo.type && photo.type.startsWith('image/')))) {
+      const name = photo.name || `delivery_stop_${Date.now()}.jpg`;
+      formData.append('delivery_photo', photo, name);
     }
     return withResult(() =>
       axiosInstance.put(
         `/delivery-routes/${routeId}/stops/${stopId}/status`,
         formData,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
+        { headers: { 'Content-Type': false } }
       )
     );
   },
@@ -349,6 +360,8 @@ export const workflowService = {
     withResult(() => axiosInstance.post('/master-data/org-units', payload)),
   getLocations: params =>
     withResult(() => axiosInstance.get('/master-data/locations', { params })),
+  seedStoreLocations: () =>
+    withResult(() => axiosInstance.post('/master-data/seed-store-locations')),
   getLocation: id =>
     withResult(() => axiosInstance.get(`/master-data/locations/${id}`)),
   createLocation: payload =>

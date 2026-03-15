@@ -14,6 +14,7 @@ const SHIPMENT_STATUS = {
 };
 
 const statusColor = {
+  PICKED: 'bg-amber-100 text-amber-700',
   SHIPPED: 'bg-blue-100 text-blue-700',
   IN_TRANSIT: 'bg-indigo-100 text-indigo-700',
   DELIVERED: 'bg-emerald-100 text-emerald-700',
@@ -91,14 +92,37 @@ export default function DriverShipmentsPage() {
       ]);
       const shipped = getList(shippedRes);
       const transit = getList(transitRes);
-      const combined = [...shipped, ...transit].sort((a, b) => new Date(b.ship_date || 0) - new Date(a.ship_date || 0));
-      setShipments(combined);
       const myRoutes = Array.isArray(myRoutesRes?.data)
         ? myRoutesRes.data
         : Array.isArray(myRoutesRes?.data?.data)
           ? myRoutesRes.data.data
           : getList(myRoutesRes);
       setShipmentToRouteId(buildShipmentToRouteId(myRoutes));
+
+      // Hiển thị lô đã được phân (tuyến Đã lên kế hoạch) cho driver — tối đa 10 request
+      const existingIds = new Set([...shipped, ...transit].map((s) => s._id));
+      const plannedShipmentIds = [];
+      (myRoutes || []).forEach((route) => {
+        (route.stops || []).forEach((stop) => {
+          (stop.shipment_ids || []).forEach((s) => {
+            const sid = typeof s === 'object' ? s._id : s;
+            if (sid && !existingIds.has(sid)) {
+              plannedShipmentIds.push(sid);
+              existingIds.add(sid);
+            }
+          });
+        });
+      });
+      const toFetch = plannedShipmentIds.slice(0, 10);
+      const plannedRes = await Promise.all(toFetch.map((id) => workflowService.getShipment(id)));
+      const planned = plannedRes
+        .filter((r) => r?.success && r?.data)
+        .map((r) => r.data);
+
+      const combined = [...planned, ...shipped, ...transit]
+        .filter((s) => s.status !== 'DELIVERED')
+        .sort((a, b) => new Date(b.ship_date || b.updatedAt || 0) - new Date(a.ship_date || a.updatedAt || 0));
+      setShipments(combined);
     } catch {
       setShipments([]);
       setShipmentToRouteId({});
@@ -152,6 +176,9 @@ export default function DriverShipmentsPage() {
     setActionLoadingId(shipment._id);
     setSuccess('');
     const routeId = shipmentToRouteId[shipment._id];
+    // Giữ file gửi API, xóa state ngay để không còn hiển thị blob/preview ở "ảnh đã gửi"
+    const fileToSend = newStatus === 'DELIVERED' ? deliveryPhotoFile : null;
+    if (newStatus === 'DELIVERED') setDeliveryPhotoFile(null);
     try {
       if (newStatus === 'IN_TRANSIT' && routeId) {
         const routeRes = await workflowService.updateRouteStatus(routeId, { status: 'IN_PROGRESS' });
@@ -163,7 +190,7 @@ export default function DriverShipmentsPage() {
       }
       const payload =
         newStatus === 'DELIVERED'
-          ? { status: newStatus, deliveryPhoto: deliveryPhotoFile }
+          ? { status: newStatus, deliveryPhoto: fileToSend }
           : newStatus;
       const res = await workflowService.updateShipmentStatus(shipment._id, payload);
       if (res.success) {
@@ -171,16 +198,29 @@ export default function DriverShipmentsPage() {
           await workflowService.updateRouteStatus(routeId, { status: 'COMPLETED' });
         }
         setSuccess(`Đã cập nhật: ${SHIPMENT_STATUS[newStatus] || newStatus}`);
-        setDetailShipment(prev => (prev?._id === shipment._id ? { ...prev, status: newStatus } : prev));
         if (newStatus === 'DELIVERED') {
-          setDeliveryPhotoFile(null);
+          // Luôn lấy dữ liệu từ server để "ảnh đã gửi" dùng delivery_photo_url (Cloudinary), không dùng local
+          const refetched = await workflowService.getShipment(shipment._id);
+          setDetailShipment(prev =>
+            prev?._id === shipment._id && refetched.success && refetched.data
+              ? refetched.data
+              : prev?._id === shipment._id
+                ? (res.data ? { ...prev, ...res.data, status: newStatus } : { ...prev, status: newStatus })
+                : prev
+          );
+        } else {
+          setDetailShipment(prev =>
+            prev?._id === shipment._id
+              ? (res.data ? { ...prev, ...res.data, status: newStatus } : { ...prev, status: newStatus })
+              : prev
+          );
         }
         loadShipments();
       } else {
         alert(res.message || 'Cập nhật thất bại');
       }
     } catch (err) {
-      alert(err?.response?.data?.message || 'Cập nhật thất bại');
+      alert(err?.response?.data?.message || err?.message || 'Cập nhật thất bại');
     } finally {
       setActionLoadingId(null);
     }
@@ -200,6 +240,9 @@ export default function DriverShipmentsPage() {
           <h1 className='text-2xl font-bold text-slate-900'>Lô giao hàng của tôi</h1>
           <p className='mt-1 text-sm text-slate-500'>
             Xem lô đang cần giao, cập nhật trạng thái vận chuyển và xác nhận đã giao đến.
+          </p>
+          <p className='mt-1 text-xs text-slate-500'>
+            <strong>Đã xuất kho</strong> (xuất kho + nhận đơn) → tới nơi thì bấm <strong>Xác nhận giao hàng</strong> (gửi ảnh). Bấm Chi tiết để thao tác.
           </p>
         </div>
         <div className='flex flex-wrap items-center gap-2'>
@@ -244,9 +287,16 @@ export default function DriverShipmentsPage() {
                   <p className='text-xs text-slate-500'>
                     Ngày giao: {sh.delivery_photo_uploaded_at ? new Date(sh.delivery_photo_uploaded_at).toLocaleString('vi-VN') : (sh.updatedAt ? new Date(sh.updatedAt).toLocaleString('vi-VN') : '-')}
                   </p>
-                  {sh.delivery_photo_url ? (
-                    <div className='mt-3 rounded-lg border border-slate-200 p-2'>
-                      <img src={resolvePhotoUrl(sh.delivery_photo_url)} alt='Ảnh giao hàng' className='h-24 w-full rounded object-cover' onError={e => { e.target.style.display = 'none'; }} />
+                  {resolvePhotoUrl(sh.delivery_photo_url) ? (
+                    <div className='mt-3'>
+                      <div className='h-24 w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100'>
+                        <img
+                          src={resolvePhotoUrl(sh.delivery_photo_url)}
+                          alt='Ảnh giao hàng'
+                          className='h-full w-full object-cover'
+                          onError={e => { e.target.style.display = 'none'; }}
+                        />
+                      </div>
                       <a href={resolvePhotoUrl(sh.delivery_photo_url)} target='_blank' rel='noopener noreferrer' className='mt-1 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-800'>Xem ảnh</a>
                     </div>
                   ) : (
@@ -300,21 +350,21 @@ export default function DriverShipmentsPage() {
                 >
                   Chi tiết
                 </button>
-                {sh.status === 'SHIPPED' && (
+                {(sh.status === 'PICKED' || sh.status === 'SHIPPED') && (
                   <button
                     disabled={actionLoadingId === sh._id}
                     onClick={() => updateStatus(sh, 'IN_TRANSIT')}
-                    className='flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60'
+                    className='flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
                   >
-                    {actionLoadingId === sh._id ? '...' : 'Nhận đơn'}
+                    {actionLoadingId === sh._id ? '...' : 'Đã xuất kho'}
                   </button>
                 )}
                 {sh.status === 'IN_TRANSIT' && (
                   <button
                     onClick={() => loadDetail(sh._id)}
-                    className='flex-1 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100'
+                    className='flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700'
                   >
-                    Cập nhật / gửi ảnh
+                    Đã tới nơi / Xác nhận giao hàng
                   </button>
                 )}
               </div>
@@ -388,18 +438,21 @@ export default function DriverShipmentsPage() {
                   </div>
                 </div>
 
-                <div className='flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between'>
-                  {detailShipment.status === 'SHIPPED' && (
+                <div className='border-t border-slate-200 pt-4'>
+                  <h3 className='mb-3 text-sm font-semibold text-slate-700'>Cập nhật trạng thái giao hàng</h3>
+                  <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                  {(detailShipment.status === 'PICKED' || detailShipment.status === 'SHIPPED') && (
                     <button
                       disabled={actionLoadingId === detailShipment._id}
                       onClick={() => updateStatus(detailShipment, 'IN_TRANSIT')}
-                      className='inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60'
+                      className='inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
                     >
-                      <ArrowRight className='h-4 w-4' /> Nhận đơn
+                      <ArrowRight className='h-4 w-4' /> Đã xuất kho
                     </button>
                   )}
                   {detailShipment.status === 'IN_TRANSIT' && (
                     <>
+                      <p className='text-sm font-medium text-slate-700'>Đã tới nơi — xác nhận giao hàng (gửi ảnh)</p>
                       <label className='flex cursor-pointer flex-1 items-center justify-between rounded-lg border border-dashed border-emerald-400 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-100'>
                         <div className='flex flex-col text-left'>
                           <span className='font-medium'>
@@ -429,13 +482,44 @@ export default function DriverShipmentsPage() {
                         onClick={() => updateStatus(detailShipment, 'DELIVERED')}
                         className='inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
                       >
-                        <CheckCircle className='h-4 w-4' /> Xác nhận đã giao đến
+                        <CheckCircle className='h-4 w-4' /> Xác nhận giao hàng
                       </button>
                     </>
                   )}
-                  {detailShipment.status === 'DELIVERED' && (
-                    <p className='text-sm font-medium text-emerald-600'>✓ Đã giao thành công</p>
+                  {!['PICKED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERED'].includes(detailShipment.status) && (
+                    <p className='text-sm text-slate-600'>
+                      Lô ở trạng thái <strong>{SHIPMENT_STATUS[detailShipment.status] || detailShipment.status}</strong>. Không có thao tác cập nhật cho trạng thái này.
+                    </p>
                   )}
+                  {detailShipment.status === 'DELIVERED' && (
+                    <div className='space-y-2'>
+                      <p className='text-sm font-medium text-emerald-600'>✓ Đã giao thành công</p>
+                      {(() => {
+                        const photoUrl = resolvePhotoUrl(detailShipment.delivery_photo_url);
+                        if (!photoUrl) return null;
+                        return (
+                          <div className='rounded-lg border border-slate-200 bg-white p-2'>
+                            <p className='mb-1 text-xs font-medium text-slate-600'>Ảnh đã gửi</p>
+                            <img
+                              src={photoUrl}
+                              alt='Ảnh giao hàng'
+                              className='max-w-[280px] rounded border border-slate-200 object-cover'
+                              onError={e => { e.target.style.display = 'none'; }}
+                            />
+                            <a
+                              href={photoUrl}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='mt-1 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-800'
+                            >
+                              Xem ảnh
+                            </a>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                  </div>
                 </div>
               </div>
             )}

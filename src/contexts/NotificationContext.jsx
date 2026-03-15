@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
@@ -16,6 +16,7 @@ const SOCKET_URL =
 export const NotificationProvider = ({ children }) => {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const socketRef = useRef(null);
   const [socket, setSocket] = useState(null);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -84,6 +85,7 @@ export const NotificationProvider = ({ children }) => {
       // no-op
     });
 
+    socketRef.current = client;
     setSocket(client);
   };
 
@@ -91,19 +93,22 @@ export const NotificationProvider = ({ children }) => {
     if (!isAuthenticated || !user) {
       setNotifications([]);
       setUnreadCount(0);
-      if (socket) {
-        socket.disconnect();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
         setSocket(null);
       }
       return;
     }
 
     fetchNotifications();
-    connectSocket();
+    const deferredSocket = setTimeout(connectSocket, 1500);
 
     return () => {
-      if (socket) {
-        socket.disconnect();
+      clearTimeout(deferredSocket);
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
         setSocket(null);
       }
     };

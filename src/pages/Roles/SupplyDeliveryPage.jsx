@@ -58,6 +58,25 @@ function getShipmentLabel(sh) {
   return sh.shipment_no || sh._id || '?';
 }
 
+function getLocationLabel(loc) {
+  if (!loc) return '-';
+  if (typeof loc === 'string') return loc;
+  return loc.name || loc.code || loc._id || '-';
+}
+
+function getShipmentsFromStops(stops) {
+  if (!Array.isArray(stops)) return [];
+  const byId = new Map();
+  stops.forEach(stop => {
+    (stop.shipment_ids || []).forEach(s => {
+      if (s && (s._id || typeof s === 'string') && !byId.has(s._id || s)) {
+        byId.set(s._id || s, typeof s === 'object' ? s : { _id: s, shipment_no: s, status: '-' });
+      }
+    });
+  });
+  return Array.from(byId.values());
+}
+
 export default function SupplyDeliveryPage() {
   const [routes, setRoutes] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
@@ -81,10 +100,11 @@ export default function SupplyDeliveryPage() {
     driver_id: '',
     planned_date: new Date().toISOString().slice(0, 10),
   });
-  const [stops, setStops] = useState([]);
-  const [orgUnits, setOrgUnits] = useState([]);
+  const [selectedShipmentId, setSelectedShipmentId] = useState('');
+  const [selectedStoreLocationId, setSelectedStoreLocationId] = useState('');
   const [shipments, setShipments] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [locations, setLocations] = useState([]);
 
   const loadRoutes = async (page = 1) => {
     setLoading(true);
@@ -158,7 +178,7 @@ export default function SupplyDeliveryPage() {
     if (!detailRoute) return;
     setActionLoading(true);
     try {
-      const res = await workflowService.completeDeliveryRoute(detailRoute._id, {});
+      const res = await workflowService.updateRouteStatus(detailRoute._id, { status: 'COMPLETED' });
       if (res.success) {
         setSuccess('Tuyến giao đã hoàn thành.');
         await loadDetail(detailRoute._id);
@@ -223,48 +243,33 @@ export default function SupplyDeliveryPage() {
       driver_id: '',
       planned_date: new Date().toISOString().slice(0, 10),
     });
-    setStops([]);
+    setSelectedShipmentId('');
+    setSelectedStoreLocationId('');
     const load = async () => {
-      const [ouRes, shRes, driversRes] = await Promise.all([
-        workflowService.getOrgUnits({ limit: 100 }),
+      const [shRes, driversRes, locRes] = await Promise.all([
         workflowService.getShipments({ limit: 200 }),
         workflowService.getDrivers({ limit: 100 }),
+        workflowService.getLocations({ status: 'ACTIVE', limit: 300 }),
       ]);
-      setOrgUnits(getList(ouRes));
       setShipments(getList(shRes));
       setDrivers(getList(driversRes));
+      setLocations(getList(locRes));
     };
     load();
   }, [createOpen]);
 
-  const addStop = () => {
-    setStops(prev => [
-      ...prev,
-      { store_org_unit_id: '', shipment_ids: [], estimated_arrival: '', estimated_departure: '', notes: '' },
-    ]);
-  };
+  const pickedShipments = useMemo(() => shipments.filter(s => s.status === 'PICKED'), [shipments]);
+  const selectedShipment = useMemo(() => shipments.find(s => s._id === selectedShipmentId), [shipments, selectedShipmentId]);
 
-  const updateStop = (idx, field, value) => {
-    setStops(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
-      return next;
-    });
-  };
-
-  const removeStop = idx => setStops(prev => prev.filter((_, i) => i !== idx));
-
-  const toggleShipmentInStop = (stopIdx, shipmentId) => {
-    setStops(prev => {
-      const next = [...prev];
-      const ids = [...next[stopIdx].shipment_ids];
-      const i = ids.indexOf(shipmentId);
-      if (i >= 0) ids.splice(i, 1);
-      else ids.push(shipmentId);
-      next[stopIdx] = { ...next[stopIdx], shipment_ids: ids };
-      return next;
-    });
-  };
+  /* Tự điền kho nhận khi chọn phiếu giao */
+  useEffect(() => {
+    if (!selectedShipmentId || !locations.length) return;
+    const sel = shipments.find(s => s._id === selectedShipmentId);
+    const toLocationId = sel?.to_location_id?._id ?? sel?.to_location_id;
+    if (!toLocationId) return;
+    const loc = locations.find(l => String(l._id) === String(toLocationId));
+    if (loc) setSelectedStoreLocationId(loc._id);
+  }, [selectedShipmentId, locations, shipments]);
 
   /* ─── Submit create ─── */
   const handleSubmitCreate = async e => {
@@ -274,9 +279,17 @@ export default function SupplyDeliveryPage() {
     try {
       if (!form.route_name.trim()) { setCreateError('Vui lòng nhập tên tuyến.'); setCreating(false); return; }
       if (!form.driver_id) { setCreateError('Vui lòng chọn tài xế.'); setCreating(false); return; }
-      if (!stops.length) { setCreateError('Vui lòng thêm ít nhất 1 điểm dừng.'); setCreating(false); return; }
-      const invalidStop = stops.find(s => !s.store_org_unit_id);
-      if (invalidStop) { setCreateError('Mỗi điểm dừng phải chọn cửa hàng.'); setCreating(false); return; }
+      if (!selectedShipmentId) { setCreateError('Vui lòng chọn phiếu giao hàng.'); setCreating(false); return; }
+      const sel = shipments.find(s => s._id === selectedShipmentId);
+      const toLocationId = sel?.to_location_id?._id ?? sel?.to_location_id;
+      const locOrg = sel?.to_location_id?.org_unit_id;
+      const orderStore = sel?.order_id?.store_org_unit_id;
+      const storeOrgId = selectedStoreLocationId
+        ? (locations.find(l => String(l._id) === String(selectedStoreLocationId))?.org_unit_id ?? null)
+        : (locOrg != null ? (typeof locOrg === 'object' ? locOrg._id : locOrg) : null)
+          || (orderStore != null ? (typeof orderStore === 'object' ? orderStore._id : orderStore) : null)
+          || (toLocationId && locations.find(l => String(l._id) === String(toLocationId))?.org_unit_id) ?? null;
+      if (!storeOrgId) { setCreateError('Vui lòng chọn kho nhận (điểm dừng).'); setCreating(false); return; }
 
       const routeRes = await workflowService.createDeliveryRoute({
         route_name: form.route_name,
@@ -293,18 +306,21 @@ export default function SupplyDeliveryPage() {
       }
 
       const routeId = routeRes.data?._id;
-
-      for (const stop of stops) {
-        const stopRes = await workflowService.addRouteStop(routeId, {
-          store_org_unit_id: stop.store_org_unit_id,
-          shipment_ids: stop.shipment_ids,
-          estimated_arrival: stop.estimated_arrival || undefined,
-          estimated_departure: stop.estimated_departure || undefined,
-          notes: stop.notes,
-        });
-        if (!stopRes.success) {
-          console.warn('Failed to add stop:', stopRes.message);
-        }
+      const planned = form.planned_date ? new Date(form.planned_date) : new Date();
+      const estArrival = new Date(planned);
+      estArrival.setHours(8, 0, 0, 0);
+      const estDeparture = new Date(planned);
+      estDeparture.setHours(9, 0, 0, 0);
+      const stopRes = await workflowService.addRouteStop(routeId, {
+        store_org_unit_id: storeOrgId,
+        shipment_ids: [selectedShipmentId],
+        estimated_arrival: estArrival.toISOString(),
+        estimated_departure: estDeparture.toISOString(),
+      });
+      if (!stopRes.success) {
+        setCreateError(stopRes.message || 'Thêm điểm dừng thất bại');
+        setCreating(false);
+        return;
       }
 
       setCreateOpen(false);
@@ -362,21 +378,19 @@ export default function SupplyDeliveryPage() {
               <th className='px-4 py-3'>Mã tuyến</th>
               <th className='px-4 py-3'>Tên tuyến</th>
               <th className='px-4 py-3'>Tài xế</th>
-              <th className='px-4 py-3'>Phương tiện</th>
               <th className='px-4 py-3'>Ngày kế hoạch</th>
               <th className='px-4 py-3'>Trạng thái</th>
               <th className='px-4 py-3 text-right'>Thao tác</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-slate-100'>
-            {loading && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-            {!loading && !filteredRoutes.length && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Chưa có tuyến giao nào.</td></tr>}
+            {loading && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
+            {!loading && !filteredRoutes.length && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Chưa có tuyến giao nào.</td></tr>}
             {!loading && filteredRoutes.map(r => (
               <tr key={r._id} className='hover:bg-slate-50/50'>
                 <td className='px-4 py-3 font-medium text-slate-900'>{r.route_no || r._id}</td>
                 <td className='px-4 py-3 text-slate-700'>{r.route_name || '-'}</td>
                 <td className='px-4 py-3 text-slate-700'>{r.driver_name || '-'}</td>
-                <td className='px-4 py-3 text-slate-700'>{r.vehicle_no || '-'} {r.vehicle_type ? `(${VEHICLE_TYPES[r.vehicle_type] || r.vehicle_type})` : ''}</td>
                 <td className='px-4 py-3 text-slate-700'>{r.planned_date ? new Date(r.planned_date).toLocaleDateString('vi-VN') : '-'}</td>
                 <td className='px-4 py-3'>
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${routeStatusColor[r.status] || 'bg-slate-100 text-slate-700'}`}>
@@ -426,8 +440,6 @@ export default function SupplyDeliveryPage() {
                     <span className='font-medium'>{detailRoute.route_name || '-'}</span>
                     <span className='text-slate-500'>Tài xế:</span>
                     <span>{detailRoute.driver_name || '-'} {detailRoute.driver_phone ? `(${detailRoute.driver_phone})` : ''}</span>
-                    <span className='text-slate-500'>Phương tiện:</span>
-                    <span>{detailRoute.vehicle_no || '-'} {detailRoute.vehicle_type ? `(${VEHICLE_TYPES[detailRoute.vehicle_type] || detailRoute.vehicle_type})` : ''}</span>
                     <span className='text-slate-500'>Ngày kế hoạch:</span>
                     <span>{detailRoute.planned_date ? new Date(detailRoute.planned_date).toLocaleDateString('vi-VN') : '-'}</span>
                     <span className='text-slate-500'>Trạng thái:</span>
@@ -453,6 +465,27 @@ export default function SupplyDeliveryPage() {
                   </div>
                 </div>
 
+                {/* Thông tin theo phiếu giao hàng */}
+                {(() => {
+                  const shipmentsInRoute = getShipmentsFromStops(detailRoute.stops);
+                  if (!shipmentsInRoute.length) return null;
+                  return (
+                    <div className='rounded-lg border border-slate-200 bg-white p-3'>
+                      <h3 className='mb-2 text-sm font-medium text-slate-700'>Thông tin theo phiếu giao hàng</h3>
+                      <ul className='space-y-1.5 text-sm'>
+                        {shipmentsInRoute.map(s => (
+                          <li key={s._id} className='flex items-center justify-between rounded-md bg-slate-50 px-3 py-2'>
+                            <span className='font-medium text-slate-800'>{getShipmentLabel(s)}</span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${s.status === 'PICKED' ? 'bg-amber-100 text-amber-700' : s.status === 'IN_TRANSIT' ? 'bg-blue-100 text-blue-700' : s.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {s.status || '-'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()}
+
                 {/* Status flow guide */}
                 <div className='rounded-lg border border-slate-200 bg-white p-3'>
                   <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Quy trình tuyến giao</h3>
@@ -468,15 +501,10 @@ export default function SupplyDeliveryPage() {
                   </div>
                 </div>
 
-                {/* Actions */}
+                {/* Actions: Supply chỉ hủy tuyến; Bắt đầu giao hàng do Driver thực hiện */}
                 <div className='flex flex-wrap gap-2'>
                   {detailRoute.status === 'PLANNED' && (
-                    <>
-                      <button disabled={actionLoading} onClick={handleStartRoute} className='rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'>
-                        <Truck className='mr-1 inline h-4 w-4' /> {actionLoading ? 'Đang xử lý...' : 'Bắt đầu giao hàng'}
-                      </button>
-                      <button disabled={actionLoading} onClick={handleCancelRoute} className='rounded-lg border border-red-200 px-4 py-2 text-sm text-red-600 hover:bg-red-50'>Hủy tuyến</button>
-                    </>
+                    <button disabled={actionLoading} onClick={handleCancelRoute} className='rounded-lg border border-red-200 px-4 py-2 text-sm text-red-600 hover:bg-red-50'>Hủy tuyến</button>
                   )}
                   {detailRoute.status === 'IN_PROGRESS' && (
                     <button disabled={actionLoading} onClick={handleCompleteRoute} className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'>
@@ -569,7 +597,6 @@ export default function SupplyDeliveryPage() {
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
 
             <form onSubmit={handleSubmitCreate} className='space-y-4'>
-              {/* Route info: 2 dropdowns per plan – PICKED shipments in stops below; driver here */}
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Tên tuyến *</label>
@@ -579,7 +606,7 @@ export default function SupplyDeliveryPage() {
                   <label className='block text-sm font-medium text-slate-700'>Ngày kế hoạch *</label>
                   <input type='date' value={form.planned_date} onChange={e => setForm(f => ({ ...f, planned_date: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required />
                 </div>
-                <div className='sm:col-span-2'>
+                <div>
                   <label className='block text-sm font-medium text-slate-700'>Tài xế *</label>
                   <select value={form.driver_id} onChange={e => setForm(f => ({ ...f, driver_id: e.target.value }))} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required>
                     <option value=''>-- Chọn tài xế --</option>
@@ -588,64 +615,58 @@ export default function SupplyDeliveryPage() {
                     ))}
                   </select>
                 </div>
+                <div>
+                  <label className='block text-sm font-medium text-slate-700'>Phiếu giao hàng *</label>
+                  <select value={selectedShipmentId} onChange={e => setSelectedShipmentId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required>
+                    <option value=''>-- Chọn phiếu giao --</option>
+                    {pickedShipments.map(sh => (
+                      <option key={sh._id} value={sh._id}>{sh.shipment_no || sh._id}</option>
+                    ))}
+                    {!pickedShipments.length && <option value='' disabled>Không có phiếu PICKED</option>}
+                  </select>
+                </div>
               </div>
 
-              {/* Stops */}
-              <div className='space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
-                <div className='flex items-center justify-between'>
-                  <span className='text-sm font-medium text-slate-700'>Điểm dừng ({stops.length})</span>
-                  <button type='button' onClick={addStop} className='text-sm font-medium text-orange-600 hover:text-orange-700'>+ Thêm điểm dừng</button>
-                </div>
-                {!stops.length && <p className='text-sm text-slate-400'>Chưa có điểm dừng. Nhấn "Thêm điểm dừng" để bắt đầu.</p>}
-                {stops.map((stop, idx) => (
-                  <div key={idx} className='rounded-lg border border-slate-200 bg-white p-3 space-y-2'>
-                    <div className='flex items-center justify-between'>
-                      <span className='text-sm font-semibold text-slate-700'>Điểm #{idx + 1}</span>
-                      <button type='button' onClick={() => removeStop(idx)} className='text-xs text-red-500 hover:text-red-600'>Xóa</button>
-                    </div>
-                    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-                      <div>
-                        <label className='block text-xs text-slate-500'>Cửa hàng *</label>
-                        <select value={stop.store_org_unit_id} onChange={e => updateStop(idx, 'store_org_unit_id', e.target.value)} className='mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm' required>
-                          <option value=''>-- Chọn cửa hàng --</option>
-                          {orgUnits.map(ou => <option key={ou._id} value={ou._id}>{ou.name || ou.code || ou._id}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className='block text-xs text-slate-500'>Ghi chú</label>
-                        <input value={stop.notes} onChange={e => updateStop(idx, 'notes', e.target.value)} className='mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm' />
-                      </div>
-                      <div>
-                        <label className='block text-xs text-slate-500'>Dự kiến đến</label>
-                        <input type='datetime-local' value={stop.estimated_arrival} onChange={e => updateStop(idx, 'estimated_arrival', e.target.value)} className='mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm' />
-                      </div>
-                      <div>
-                        <label className='block text-xs text-slate-500'>Dự kiến rời</label>
-                        <input type='datetime-local' value={stop.estimated_departure} onChange={e => updateStop(idx, 'estimated_departure', e.target.value)} className='mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm' />
-                      </div>
-                    </div>
-                    {/* Shipment selection – only PICKED per plan */}
-                    <div>
-                      <label className='block text-xs text-slate-500'>Lô hàng giao tại điểm này (chỉ phiếu PICKED)</label>
-                      <div className='mt-1 flex flex-wrap gap-1'>
-                        {shipments.filter(s => s.status === 'PICKED').map(sh => (
-                          <label key={sh._id} className={`inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 text-xs ${stop.shipment_ids.includes(sh._id) ? 'border-orange-300 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                            <input type='checkbox' className='sr-only' checked={stop.shipment_ids.includes(sh._id)} onChange={() => toggleShipmentInStop(idx, sh._id)} />
-                            {sh.shipment_no || sh._id}
-                          </label>
-                        ))}
-                        {!shipments.filter(s => s.status === 'PICKED').length && (
-                          <span className='text-xs text-slate-400'>Không có phiếu PICKED</span>
-                        )}
-                      </div>
-                    </div>
+              {/* Kho nhận (điểm dừng): chọn từ dropdown hoặc tự điền theo phiếu giao */}
+              <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+                <label className='block text-sm font-medium text-slate-700'>Kho nhận (điểm dừng) *</label>
+                <select
+                  value={selectedStoreLocationId}
+                  onChange={e => setSelectedStoreLocationId(e.target.value)}
+                  className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+                  required
+                >
+                  <option value=''>-- Chọn kho nhận --</option>
+                  {(() => {
+                    const byId = new Map();
+                    locations.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+                    return Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                  })().map(loc => (
+                    <option key={loc._id} value={loc._id}>{loc.name || loc.code || loc._id}{loc.org_unit_id?.name ? ` (${loc.org_unit_id.name})` : ''}</option>
+                  ))}
+                </select>
+                {selectedShipmentId && selectedShipment && (
+                  <div className='mt-2 rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-600'>
+                    <p className='font-medium text-slate-700'>Thông tin phiếu giao hàng</p>
+                    <ul className='mt-1 space-y-0.5'>
+                      <li>Phiếu: <strong>{getShipmentLabel(selectedShipment)}</strong></li>
+                      {selectedShipment.order_id && (
+                        <li>Đơn hàng: {typeof selectedShipment.order_id === 'object' ? selectedShipment.order_id.order_no : selectedShipment.order_id}</li>
+                      )}
+                      <li>Kho xuất: {getLocationLabel(selectedShipment.from_location_id)}</li>
+                      <li>Kho nhận (theo phiếu): {getLocationLabel(selectedShipment.to_location_id)}</li>
+                      {selectedShipment.ship_date && (
+                        <li>Ngày giao: {new Date(selectedShipment.ship_date).toLocaleDateString('vi-VN')}</li>
+                      )}
+                    </ul>
+                    <p className='mt-1.5 text-slate-400'>Điểm dừng duy nhất. Có thể chọn lại kho nhận ở dropdown trên nếu cần.</p>
                   </div>
-                ))}
+                )}
               </div>
 
               <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
                 <button type='button' disabled={creating} onClick={() => setCreateOpen(false)} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
-                <button type='submit' disabled={creating || !stops.length} className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'>
+                <button type='submit' disabled={creating || !selectedShipmentId || !selectedStoreLocationId} className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'>
                   {creating ? 'Đang tạo...' : 'Tạo tuyến giao'}
                 </button>
               </div>

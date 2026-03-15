@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+// In dev, use /api so Vite proxy forwards to backend (no CORS, same origin). Else use env or default.
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? '/api' : 'http://localhost:5001/api');
 
 // Create axios instance
 const axiosInstance = axios.create({

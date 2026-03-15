@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { Check, RefreshCcw, Search, X } from 'lucide-react';
 import axiosInstance from '../../utils/axiosInstance';
@@ -14,6 +14,8 @@ const statusLabels = {
   RECEIVED: 'Đã nhận',
   CANCELLED: 'Đã hủy',
 };
+
+const PAGE_SIZE = 20;
 
 const getStatusClasses = status => {
   switch (status) {
@@ -40,37 +42,68 @@ export default function CentralOrdersPage() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [shipmentFilter, setShipmentFilter] = useState('ALL'); // 'ALL' | 'NO_SHIPMENT' | 'HAS_SHIPMENT'
   const [search, setSearch] = useState('');
+  const [searchDebounced, setSearchDebounced] = useState('');
+  const searchDebounceRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [detailId, setDetailId] = useState(null);
   const [detailOrder, setDetailOrder] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [orderIdsWithShipment, setOrderIdsWithShipment] = useState(new Set());
+  const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 1 });
 
-  const loadOrders = async () => {
+  const loadOrders = async (pageNum = 1) => {
     setLoading(true);
     setSuccess('');
     try {
-      const res = await axiosInstance.get('/internal-orders', {
+      const ordersRes = await axiosInstance.get('/internal-orders', {
         params: {
-          limit: 50,
+          page: pageNum,
+          limit: PAGE_SIZE,
           ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
         },
       });
-      const list = Array.isArray(res.data?.data) ? res.data.data : [];
+      const list = Array.isArray(ordersRes.data?.data) ? ordersRes.data.data : [];
       setOrders(list);
+      const p = ordersRes.data?.pagination ?? {};
+      setPagination({
+        page: p.page ?? pageNum,
+        limit: p.limit ?? PAGE_SIZE,
+        total: p.total ?? 0,
+        pages: p.pages ?? 1,
+      });
+      setLoading(false);
+      // Tải danh sách phiếu giao sau khi đã vẽ bảng (tránh block main thread), limit nhỏ để response nhanh
+      setTimeout(() => {
+        workflowService.getShipmentsPaginated({ limit: 50 }).then((shipmentsRes) => {
+          const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
+          const shipList = Array.isArray(shipData) ? shipData : [];
+          const ids = new Set(shipList.map(s => (s.order_id?._id ?? s.order_id)).filter(Boolean));
+          setOrderIdsWithShipment(ids);
+        }).catch(() => setOrderIdsWithShipment(new Set()));
+      }, 150);
     } catch (err) {
       console.error(err);
       setOrders([]);
+      setOrderIdsWithShipment(new Set());
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadOrders();
+    loadOrders(1);
   }, [statusFilter]);
+
+  // Debounce search để tránh re-render bảng trên mỗi lần gõ
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setSearchDebounced(search), 280);
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, [search]);
 
   const loadDetail = async (id) => {
     setDetailId(id);
@@ -83,8 +116,8 @@ export default function CentralOrdersPage() {
   };
 
   const filteredOrders = useMemo(() => {
-    const s = (search || '').toLowerCase();
-    return orders.filter(o => {
+    const s = (searchDebounced || '').toLowerCase();
+    let list = orders.filter(o => {
       const no = o.order_no || o._id || '';
       const storeName = o.store_org_unit_id?.name || '';
       return (
@@ -93,7 +126,10 @@ export default function CentralOrdersPage() {
         storeName.toLowerCase().includes(s)
       );
     });
-  }, [orders, search]);
+    if (shipmentFilter === 'NO_SHIPMENT') list = list.filter(o => !orderIdsWithShipment.has(o._id));
+    if (shipmentFilter === 'HAS_SHIPMENT') list = list.filter(o => orderIdsWithShipment.has(o._id));
+    return list;
+  }, [orders, searchDebounced, shipmentFilter, orderIdsWithShipment]);
 
   const updateStatus = async (order, nextStatus) => {
     setActionLoadingId(order._id);
@@ -104,7 +140,7 @@ export default function CentralOrdersPage() {
       });
       setSuccess(`Đơn ${order.order_no || order._id} → ${statusLabels[nextStatus] || nextStatus} thành công.`);
       setDetailOrder(prev => (prev?._id === order._id ? { ...prev, status: nextStatus } : prev));
-      await loadOrders();
+      await loadOrders(pagination.page);
       return true;
     } catch (err) {
       console.error(err);
@@ -145,7 +181,7 @@ export default function CentralOrdersPage() {
             Xem chi tiết đơn trước khi phê duyệt hoặc từ chối.
           </p>
         </div>
-        <div className='flex gap-2'>
+        <div className='flex flex-wrap gap-2'>
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
@@ -160,8 +196,18 @@ export default function CentralOrdersPage() {
             <option value='RECEIVED'>Đã nhận</option>
             <option value='CANCELLED'>Đã hủy</option>
           </select>
+          <select
+            value={shipmentFilter}
+            onChange={e => setShipmentFilter(e.target.value)}
+            className='input-field min-w-[160px]'
+            title='Lọc theo đơn đã có phiếu giao hàng'
+          >
+            <option value='ALL'>Phiếu giao: Tất cả</option>
+            <option value='NO_SHIPMENT'>Chưa có phiếu giao</option>
+            <option value='HAS_SHIPMENT'>Đã có phiếu giao</option>
+          </select>
           <button
-            onClick={loadOrders}
+            onClick={() => loadOrders(pagination.page)}
             className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'
           >
             <RefreshCcw className='h-4 w-4' /> Làm mới
@@ -238,7 +284,7 @@ export default function CentralOrdersPage() {
                   {order.total_amount?.toLocaleString('vi-VN')} đ
                 </td>
                 <td className='px-4 py-3 text-xs'>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${getStatusClasses(order.status)}`}>
+                  <span className={`inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-medium ${getStatusClasses(order.status)}`}>
                     {statusLabels[order.status] || order.status}
                   </span>
                 </td>
@@ -249,12 +295,47 @@ export default function CentralOrdersPage() {
                   >
                     Chi tiết
                   </button>
+                  {(order.status === 'APPROVED' || order.status === 'PROCESSING') && !orderIdsWithShipment.has(order._id) && (
+                    <Link
+                      to={`/app/central/shipments?create=1&orderId=${order._id}`}
+                      className='ml-1 rounded-md border border-orange-200 px-2 py-1 text-xs text-orange-600 hover:bg-orange-50'
+                    >
+                      Tạo phiếu giao
+                    </Link>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {pagination.total > 0 && (
+        <div className='flex items-center justify-between text-sm text-slate-500'>
+          <p>
+            Hiển thị {(pagination.page - 1) * pagination.limit + 1} - {Math.min(pagination.page * pagination.limit, pagination.total)} / {pagination.total}
+          </p>
+          <div className='flex items-center gap-2'>
+            <button
+              type='button'
+              onClick={() => loadOrders(pagination.page - 1)}
+              disabled={pagination.page <= 1}
+              className='rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50 hover:bg-slate-50'
+            >
+              Trước
+            </button>
+            <span>Trang {pagination.page} / {Math.max(1, pagination.pages)}</span>
+            <button
+              type='button'
+              onClick={() => loadOrders(pagination.page + 1)}
+              disabled={pagination.page >= Math.max(1, pagination.pages)}
+              className='rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50 hover:bg-slate-50'
+            >
+              Sau
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Modal chi tiết đơn – render qua Portal để luôn căn giữa viewport */}
       {detailId && createPortal(
@@ -279,7 +360,7 @@ export default function CentralOrdersPage() {
                   <span className='text-slate-500'>Ngày đặt:</span>
                   <span>{detailOrder.order_date ? new Date(detailOrder.order_date).toLocaleString('vi-VN') : '-'}</span>
                   <span className='text-slate-500'>Trạng thái:</span>
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${getStatusClasses(detailOrder.status)}`}>
+                  <span className={`inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-medium ${getStatusClasses(detailOrder.status)}`}>
                     {statusLabels[detailOrder.status] || detailOrder.status}
                   </span>
                   <span className='text-slate-500'>Gấp:</span>
@@ -312,6 +393,26 @@ export default function CentralOrdersPage() {
                     </tbody>
                   </table>
                 </div>
+                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && !orderIdsWithShipment.has(detailOrder._id) && (
+                  <div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4'>
+                    <Link
+                      to={`/app/central/shipments?create=1&orderId=${detailOrder._id}`}
+                      className='rounded-lg border border-orange-200 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50'
+                    >
+                      Tạo phiếu giao hàng
+                    </Link>
+                  </div>
+                )}
+                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && orderIdsWithShipment.has(detailOrder._id) && (
+                  <div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4'>
+                    <Link
+                      to='/app/central/shipments'
+                      className='rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50'
+                    >
+                      Xem phiếu giao hàng
+                    </Link>
+                  </div>
+                )}
                 {detailOrder.status === 'SUBMITTED' && (
                   <div className='flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4'>
                     <button

@@ -29,9 +29,12 @@ export const useAlertSummary = (locationId) => {
   };
 
   useEffect(() => {
-    fetchSummary();
+    const deferred = setTimeout(fetchSummary, 400);
     const interval = setInterval(fetchSummary, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(deferred);
+      clearInterval(interval);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationId]);
 

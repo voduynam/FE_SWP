@@ -152,9 +152,20 @@ export default function CentralProductionPage() {
     else setDetailError(res.message || 'Không tìm thấy lệnh sản xuất');
   };
 
+  /** Nhãn đơn hàng nội bộ gắn với lệnh sản xuất (BE có thể trả internal_order_id là object hoặc id) */
+  const getOrderLabel = (po) => {
+    const io = po?.internal_order_id;
+    if (!io) return '—';
+    return typeof io === 'object' ? (io.order_no || io._id || '—') : io;
+  };
+
   const filteredOrders = useMemo(() => {
     const s = (search || '').toLowerCase();
-    return orders.filter(o => (o.prod_order_no || o._id || '').toLowerCase().includes(s));
+    return orders.filter(o => {
+      const orderNo = (o.prod_order_no || o._id || '').toLowerCase();
+      const orderLabel = (getOrderLabel(o) || '').toLowerCase();
+      return !s || orderNo.includes(s) || orderLabel.includes(s);
+    });
   }, [orders, search]);
 
   const handleSelectInternalOrder = async (orderId) => {
@@ -281,11 +292,13 @@ export default function CentralProductionPage() {
         setCreating(false);
         return;
       }
-      const createRes = await workflowService.createProductionOrder({
+      const payload = {
         planned_start: plannedStart,
         planned_end: plannedEnd,
         lines,
-      });
+      };
+      if (selectedIO?._id) payload.internal_order_id = selectedIO._id;
+      const createRes = await workflowService.createProductionOrder(payload);
       if (!createRes.success) {
         setCreateError(createRes.message || 'Tạo lệnh sản xuất thất bại');
         setCreating(false);
@@ -638,7 +651,7 @@ export default function CentralProductionPage() {
       <div className='flex flex-col gap-3 sm:flex-row'>
         <div className='relative flex-1'>
           <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder='Tìm theo số lệnh...' className='input-field w-full pl-9' />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder='Tìm theo số lệnh hoặc đơn hàng...' className='input-field w-full pl-9' />
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className='input-field min-w-[180px]'>
           <option value='ALL'>Tất cả trạng thái</option>
@@ -651,6 +664,7 @@ export default function CentralProductionPage() {
           <thead className='bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
             <tr>
               <th className='px-4 py-3'>Số lệnh</th>
+              <th className='px-4 py-3'>Đơn hàng (nội bộ)</th>
               <th className='px-4 py-3'>Kế hoạch bắt đầu</th>
               <th className='px-4 py-3'>Kế hoạch kết thúc</th>
               <th className='px-4 py-3'>Trạng thái</th>
@@ -658,11 +672,23 @@ export default function CentralProductionPage() {
             </tr>
           </thead>
           <tbody className='divide-y divide-slate-100'>
-            {loading && <tr><td colSpan={5} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-            {!loading && !filteredOrders.length && <tr><td colSpan={5} className='px-4 py-6 text-center text-slate-400'>Chưa có lệnh sản xuất.</td></tr>}
+            {loading && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
+            {!loading && !filteredOrders.length && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Chưa có lệnh sản xuất.</td></tr>}
             {!loading && filteredOrders.map(o => (
               <tr key={o._id}>
                 <td className='px-4 py-3 font-medium text-slate-900'>{o.prod_order_no || o._id}</td>
+                <td className='px-4 py-3 text-slate-700'>
+                  {(() => {
+                    const ioId = typeof o.internal_order_id === 'object' ? o.internal_order_id?._id : o.internal_order_id;
+                    const label = getOrderLabel(o);
+                    if (!ioId) return <span className='text-slate-400'>—</span>;
+                    return (
+                      <Link to={ioId ? `/app/central/orders?highlight=${ioId}` : '#'} className='text-sky-600 hover:text-sky-800 hover:underline'>
+                        {label}
+                      </Link>
+                    );
+                  })()}
+                </td>
                 <td className='px-4 py-3 text-slate-700'>{o.planned_start ? new Date(o.planned_start).toLocaleString('vi-VN') : '-'}</td>
                 <td className='px-4 py-3 text-slate-700'>{o.planned_end ? new Date(o.planned_end).toLocaleString('vi-VN') : '-'}</td>
                 <td className='px-4 py-3'>
@@ -708,6 +734,19 @@ export default function CentralProductionPage() {
                   <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
                     <span className='text-slate-500'>Số lệnh:</span>
                     <span className='font-medium text-slate-900'>{detailOrder.prod_order_no || detailOrder._id}</span>
+                    <span className='text-slate-500'>Đơn hàng (nội bộ):</span>
+                    <span>
+                      {(() => {
+                        const ioId = typeof detailOrder.internal_order_id === 'object' ? detailOrder.internal_order_id?._id : detailOrder.internal_order_id;
+                        const label = getOrderLabel(detailOrder);
+                        if (!ioId) return <span className='text-slate-400'>— Không liên kết</span>;
+                        return (
+                          <Link to={`/app/central/orders?highlight=${ioId}`} className='text-sky-600 hover:text-sky-800 hover:underline'>
+                            {label}
+                          </Link>
+                        );
+                      })()}
+                    </span>
                     <span className='text-slate-500'>Trạng thái:</span>
                     <span><span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${detailOrder.status === 'DONE' ? 'bg-emerald-100 text-emerald-700' : detailOrder.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' : detailOrder.status === 'PLANNED' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}>{PROD_STATUS[detailOrder.status] || detailOrder.status}</span></span>
                     <span className='text-slate-500'>Kế hoạch bắt đầu:</span>

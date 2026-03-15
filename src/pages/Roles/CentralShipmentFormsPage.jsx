@@ -27,8 +27,27 @@ function getList(res) {
   if (!res?.success) return [];
   if (Array.isArray(res.data)) return res.data;
   if (Array.isArray(res.data?.data)) return res.data.data;
+  if (Array.isArray(res.data?.items)) return res.data.items;
   return [];
 }
+
+function getOrgUnitList(res) {
+  const list = getList(res);
+  if (list.length) return list;
+  const d = res?.data;
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d?.data)) return d.data;
+  if (Array.isArray(d?.items)) return d.items;
+  return [];
+}
+
+/** Location kho cửa hàng do seed tạo (org_store_q1 + loc_str_q1). Option tổng hợp khi GET locations không trả kho cửa hàng. */
+const SEED_STORE_LOCATION = {
+  _id: 'loc_str_q1',
+  name: 'Kho Q1',
+  code: 'WH_STR_Q1',
+  org_unit_id: 'org_store_q1',
+};
 
 function getLocationLabel(loc) {
   if (!loc) return '-';
@@ -83,10 +102,10 @@ export default function CentralShipmentFormsPage() {
 
   useEffect(() => { loadShipments(); }, []);
 
+  /* Kho xuất: chỉ KITCHEN. Kho nhận: kho từ getLocations + KITCHEN org + STORE org, bỏ trùng _id */
   useEffect(() => {
     if (!createOpen) return;
     setCreateShipmentError('');
-    setSelectedOrderId('');
     setOrderDetail(null);
     setShipLines([]);
     setFromLocationId('');
@@ -96,15 +115,38 @@ export default function CentralShipmentFormsPage() {
     setCreateShipmentDataLoading(true);
     const loadData = async () => {
       try {
-        const [approvedRes, processingRes, locKitchenRes, locStoreRes] = await Promise.all([
+        const seedRes = await workflowService.seedStoreLocations();
+        const seedLocs = Array.isArray(seedRes?.data?.locations) ? seedRes.data.locations : [];
+        // Chỉ gọi getLocations không truyền org_unit_id → BE trả về tất cả kho (bếp + cửa hàng). status=ACTIVE đồng bộ với API.
+        const [approvedRes, processingRes, orgKitchenRes, orgStoreRes, allLocsRes, shipmentsRes] = await Promise.all([
           workflowService.getInternalOrders({ status: 'APPROVED', limit: 100 }),
           workflowService.getInternalOrders({ status: 'PROCESSING', limit: 100 }),
-          workflowService.getLocations({ org_unit_type: 'KITCHEN', limit: 100 }),
-          workflowService.getLocations({ org_unit_type: 'STORE', limit: 100 }),
+          workflowService.getOrgUnits({ type: 'KITCHEN', limit: 100 }),
+          workflowService.getOrgUnits({ type: 'STORE', limit: 100 }),
+          workflowService.getLocations({ status: 'ACTIVE', limit: 1000 }),
+          workflowService.getShipmentsPaginated({ limit: 200 }),
         ]);
-        setOrders([...getList(approvedRes), ...getList(processingRes)]);
-        setFromLocations(getList(locKitchenRes));
-        setToLocations(getList(locStoreRes));
+        const combinedOrders = [...getList(approvedRes), ...getList(processingRes)];
+        const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
+        const shipList = Array.isArray(shipData) ? shipData : [];
+        const orderIdsWithShipment = new Set(shipList.map(s => String(s.order_id?._id ?? s.order_id)).filter(Boolean));
+        const ordersWithoutShipment = combinedOrders.filter(o => !orderIdsWithShipment.has(String(o._id)));
+        setOrders(ordersWithoutShipment);
+        const kitchenOrgs = getList(orgKitchenRes);
+        const fromLocs = [];
+        for (const org of kitchenOrgs) {
+          const res = await workflowService.getLocations({ org_unit_id: org._id, limit: 100 });
+          fromLocs.push(...getList(res));
+        }
+        setFromLocations(fromLocs);
+        const byId = new Map();
+        fromLocs.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+        getList(allLocsRes).forEach(l => { if (l && l._id) byId.set(l._id, l); });
+        seedLocs.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+        const storeOrgs = getOrgUnitList(orgStoreRes);
+        const hasStoreQ1 = storeOrgs.some(o => (o?._id ?? o?.id) === 'org_store_q1');
+        if (hasStoreQ1) byId.set(SEED_STORE_LOCATION._id, { ...SEED_STORE_LOCATION, org_unit_id: storeOrgs.find(o => (o?._id ?? o?.id) === 'org_store_q1') || SEED_STORE_LOCATION.org_unit_id });
+        setToLocations(Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       } catch (e) {
         setCreateShipmentError(e?.message || 'Không tải được đơn hàng hoặc danh sách kho.');
       } finally {
@@ -308,6 +350,11 @@ export default function CentralShipmentFormsPage() {
         ship_date: shipDate ? new Date(shipDate).toISOString() : new Date().toISOString(),
         lines: linesToSend,
       };
+      if (!payload.from_location_id || !payload.to_location_id) {
+        setCreateShipmentError('Vui lòng chọn đủ kho xuất và kho nhận.');
+        setCreatingShipment(false);
+        return;
+      }
       const res = await workflowService.createShipment(payload);
       if (!res.success) {
         setCreateShipmentError(res.message || 'Tạo phiếu giao hàng thất bại');
@@ -415,7 +462,7 @@ export default function CentralShipmentFormsPage() {
 
             <form onSubmit={submitCreateShipment} className='space-y-4'>
               <div>
-                <label className='block text-sm font-medium text-slate-700'>Chọn đơn hàng ({ORDER_STATUS_FOR_SHIPMENT.join(' / ')})</label>
+                <label className='block text-sm font-medium text-slate-700'>Chọn đơn hàng ({ORDER_STATUS_FOR_SHIPMENT.join(' / ')} — chỉ đơn chưa có phiếu giao)</label>
                 <select value={selectedOrderId} onChange={e => setSelectedOrderId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required disabled={createShipmentDataLoading}>
                   <option value=''>-- Chọn đơn hàng --</option>
                   {orders.map(o => (
@@ -424,7 +471,7 @@ export default function CentralShipmentFormsPage() {
                     </option>
                   ))}
                 </select>
-                {!createShipmentDataLoading && orders.length === 0 && <p className='mt-1 text-xs text-amber-600'>Chưa có đơn hàng APPROVED hoặc PROCESSING.</p>}
+                {!createShipmentDataLoading && orders.length === 0 && <p className='mt-1 text-xs text-amber-600'>Không có đơn APPROVED/PROCESSING nào chưa có phiếu giao hàng.</p>}
               </div>
 
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
@@ -438,7 +485,7 @@ export default function CentralShipmentFormsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className='block text-sm font-medium text-slate-700'>Kho nhận (Cửa hàng)</label>
+                  <label className='block text-sm font-medium text-slate-700'>Kho nhận</label>
                   <select value={toLocationId} onChange={e => setToLocationId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required disabled={createShipmentDataLoading}>
                     <option value=''>-- Chọn kho nhận --</option>
                     {toLocations.map(l => (

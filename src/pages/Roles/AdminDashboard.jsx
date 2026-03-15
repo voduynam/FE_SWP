@@ -80,7 +80,6 @@ export default function AdminDashboard() {
     const [
       overviewRes,
       orderRes,
-      alertRes,
       orgRes,
       ordersDashRes,
       prodDashRes,
@@ -90,7 +89,6 @@ export default function AdminDashboard() {
     ] = await Promise.all([
       workflowService.getDashboardOverview({}),
       workflowService.getInternalOrders({ limit: 8 }),
-      workflowService.getAlertsSummary({}),
       workflowService.getOrgUnits({ type: 'STORE', status: 'ACTIVE' }),
       workflowService.getDashboardOrders({}),
       workflowService.getDashboardProduction({}),
@@ -120,9 +118,6 @@ export default function AdminDashboard() {
     }));
     if (orderRes.success) {
       setOrders(getRows(orderRes.data));
-    }
-    if (alertRes.success) {
-      setAlerts(alertRes.data?.recent_alerts || []);
     }
     if (ordersDashRes.success) setOrdersStats(ordersDashRes.data);
     if (prodDashRes.success) setProductionStats(prodDashRes.data);

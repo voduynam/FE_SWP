@@ -1,4 +1,5 @@
 /* eslint-disable no-unused-vars */
+import { lazy, Suspense } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -16,45 +17,44 @@ import RoleProtectedRoute from './components/RoleProtectedRoute';
 import RedirectRoute from './components/RedirectRoute';
 import Layout from './components/Layout/Layout';
 import CkManagerLayout from './components/Layout/CkManagerLayout';
-// import Home from './pages/Home/Home';
 import Login from './pages/Auth/Login';
 import NotFound from './pages/NotFound/NotFound';
 import RoleDashboard from './pages/Roles/RoleDashboard';
 import AlertsDashboardPage from './pages/Roles/AlertsDashboardPage';
-// Admin pages
-import AdminUsersPage from './pages/Roles/AdminUsersPage';
-import AdminStoresPage from './pages/Roles/AdminStoresPage';
-import AdminSettingsPage from './pages/Roles/AdminSettingsPage';
-// Manager pages
-import ManagerProductsPage from './pages/Roles/ManagerProductsPage';
-import ManagerInventoryPage from './pages/Roles/ManagerInventoryPage';
-import ManagerReportsPage from './pages/Roles/ManagerReportsPage';
-import ManagerReturnRequestPage from './pages/Roles/ManagerReturnRequestPage';
-import RecipesPage from './pages/Roles/RecipesPage';
-// Franchise store pages
-import FranchiseOrdersPage from './pages/Roles/FranchiseOrdersPage';
-import FranchiseInventoryPage from './pages/Roles/FranchiseInventoryPage';
-import GoodsReceiptPage from './pages/Roles/GoodsReceiptPage';
-import StoreReturnRequestPage from './pages/Roles/StoreReturnRequestPage';
-// Central kitchen pages
-import CentralOrdersPage from './pages/Roles/CentralOrdersPage';
-import CentralProductionPage from './pages/Roles/CentralProductionPage';
-import CentralShipmentsPage from './pages/Roles/CentralShipmentsPage';
-import CentralMaterialsPage from './pages/Roles/CentralMaterialsPage';
-// Supply coordinator pages
-import SupplyOrdersPage from './pages/Roles/SupplyOrdersPage';
-import SupplyDeliveryPage from './pages/Roles/SupplyDeliveryPage';
-import SupplyIssuesPage from './pages/Roles/SupplyIssuesPage';
-import DriverDashboard from './pages/Roles/DriverDashboard';
-import DriverShipmentsPage from './pages/Roles/DriverShipmentsPage';
-import Delivery from './pages/Delivery/Delivery';
-import PaymentSuccessPage from './pages/Payment/PaymentSuccessPage';
-import PaymentFailedPage from './pages/Payment/PaymentFailedPage';
+const AdminUsersPage = lazy(() => import('./pages/Roles/AdminUsersPage'));
+const AdminStoresPage = lazy(() => import('./pages/Roles/AdminStoresPage'));
+const AdminSettingsPage = lazy(() => import('./pages/Roles/AdminSettingsPage'));
+const ManagerProductsPage = lazy(() => import('./pages/Roles/ManagerProductsPage'));
+const ManagerInventoryPage = lazy(() => import('./pages/Roles/ManagerInventoryPage'));
+const ManagerReportsPage = lazy(() => import('./pages/Roles/ManagerReportsPage'));
+const ManagerReturnRequestPage = lazy(() => import('./pages/Roles/ManagerReturnRequestPage'));
+const RecipesPage = lazy(() => import('./pages/Roles/RecipesPage'));
+const FranchiseOrdersPage = lazy(() => import('./pages/Roles/FranchiseOrdersPage'));
+const FranchiseInventoryPage = lazy(() => import('./pages/Roles/FranchiseInventoryPage'));
+const GoodsReceiptPage = lazy(() => import('./pages/Roles/GoodsReceiptPage'));
+const StoreReturnRequestPage = lazy(() => import('./pages/Roles/StoreReturnRequestPage'));
+const CentralOrdersPage = lazy(() => import('./pages/Roles/CentralOrdersPage'));
+const CentralProductionPage = lazy(() => import('./pages/Roles/CentralProductionPage'));
+const CentralShipmentsPage = lazy(() => import('./pages/Roles/CentralShipmentsPage'));
+const CentralMaterialsPage = lazy(() => import('./pages/Roles/CentralMaterialsPage'));
+const SupplyOrdersPage = lazy(() => import('./pages/Roles/SupplyOrdersPage'));
+const SupplyDeliveryPage = lazy(() => import('./pages/Roles/SupplyDeliveryPage'));
+const SupplyIssuesPage = lazy(() => import('./pages/Roles/SupplyIssuesPage'));
+const DriverDashboard = lazy(() => import('./pages/Roles/DriverDashboard'));
+const DriverShipmentsPage = lazy(() => import('./pages/Roles/DriverShipmentsPage'));
+const Delivery = lazy(() => import('./pages/Delivery/Delivery'));
+const PaymentSuccessPage = lazy(() => import('./pages/Payment/PaymentSuccessPage'));
+const PaymentFailedPage = lazy(() => import('./pages/Payment/PaymentFailedPage'));
+
+const PageFallback = () => (
+  <div className="flex min-h-[200px] items-center justify-center text-slate-500">Đang tải...</div>
+);
 
 
 function AppContent() {
   return (
-    <Routes>
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
       {/* Root route - redirect to login if not authenticated, otherwise to dashboard */}
       <Route path='/' element={<RedirectRoute />} />
       
@@ -149,6 +149,7 @@ function AppContent() {
       {/* <Route path='/register' element={<Register />} /> */}
       <Route path='*' element={<NotFound />} />
     </Routes>
+    </Suspense>
   );
 }
 
