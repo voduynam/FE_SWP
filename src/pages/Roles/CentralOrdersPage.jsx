@@ -76,12 +76,17 @@ export default function CentralOrdersPage() {
         pages: p.pages ?? 1,
       });
       setLoading(false);
-      // Tải danh sách phiếu giao sau khi đã vẽ bảng (tránh block main thread), limit nhỏ để response nhanh
+      // Tải danh sách phiếu giao (chỉ phiếu còn hiệu lực, không tính Đã hủy) để quyết định nút "Tạo phiếu giao"
       setTimeout(() => {
-        workflowService.getShipmentsPaginated({ limit: 50 }).then((shipmentsRes) => {
+        workflowService.getShipmentsPaginated({ limit: 500 }).then((shipmentsRes) => {
           const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
           const shipList = Array.isArray(shipData) ? shipData : [];
-          const ids = new Set(shipList.map(s => (s.order_id?._id ?? s.order_id)).filter(Boolean));
+          const ids = new Set(
+            shipList
+              .filter(s => s.status !== 'CANCELLED')
+              .map(s => String(s.order_id?._id ?? s.order_id))
+              .filter(Boolean)
+          );
           setOrderIdsWithShipment(ids);
         }).catch(() => setOrderIdsWithShipment(new Set()));
       }, 150);
@@ -94,9 +99,48 @@ export default function CentralOrdersPage() {
     }
   };
 
+  /** Khi lọc theo phiếu giao: tải hết đơn (tối đa 500) rồi lọc + phân trang phía client */
+  const loadAllForShipmentFilter = async () => {
+    setLoading(true);
+    setSuccess('');
+    try {
+      const [ordersRes, shipmentsRes] = await Promise.all([
+        axiosInstance.get('/internal-orders', {
+          params: {
+            page: 1,
+            limit: 500,
+            ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
+          },
+        }),
+        workflowService.getShipmentsPaginated({ limit: 500 }),
+      ]);
+      const list = Array.isArray(ordersRes.data?.data) ? ordersRes.data.data : [];
+      setOrders(list);
+      const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
+      const shipList = Array.isArray(shipData) ? shipData : [];
+      const ids = new Set(
+        shipList
+          .filter(s => s.status !== 'CANCELLED')
+          .map(s => String(s.order_id?._id ?? s.order_id))
+          .filter(Boolean)
+      );
+      setOrderIdsWithShipment(ids);
+    } catch (err) {
+      console.error(err);
+      setOrders([]);
+      setOrderIdsWithShipment(new Set());
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    loadOrders(1);
-  }, [statusFilter]);
+    if (shipmentFilter === 'NO_SHIPMENT' || shipmentFilter === 'HAS_SHIPMENT') {
+      loadAllForShipmentFilter();
+    } else {
+      loadOrders(1);
+    }
+  }, [statusFilter, shipmentFilter]);
 
   // Debounce search để tránh re-render bảng trên mỗi lần gõ
   useEffect(() => {
@@ -126,10 +170,32 @@ export default function CentralOrdersPage() {
         storeName.toLowerCase().includes(s)
       );
     });
-    if (shipmentFilter === 'NO_SHIPMENT') list = list.filter(o => !orderIdsWithShipment.has(o._id));
-    if (shipmentFilter === 'HAS_SHIPMENT') list = list.filter(o => orderIdsWithShipment.has(o._id));
+    if (shipmentFilter === 'NO_SHIPMENT') {
+      list = list.filter(o => o.status === 'APPROVED' && !orderIdsWithShipment.has(String(o._id)));
+    }
+    if (shipmentFilter === 'HAS_SHIPMENT') list = list.filter(o => orderIdsWithShipment.has(String(o._id)));
     return list;
   }, [orders, searchDebounced, shipmentFilter, orderIdsWithShipment]);
+
+  const isShipmentFilterActive = shipmentFilter === 'NO_SHIPMENT' || shipmentFilter === 'HAS_SHIPMENT';
+  const ordersToShow = useMemo(() => {
+    if (!isShipmentFilterActive) return filteredOrders;
+    const start = (pagination.page - 1) * PAGE_SIZE;
+    return filteredOrders.slice(start, start + PAGE_SIZE);
+  }, [isShipmentFilterActive, filteredOrders, pagination.page]);
+
+  useEffect(() => {
+    if (!isShipmentFilterActive) return;
+    const total = filteredOrders.length;
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    setPagination(prev => ({
+      ...prev,
+      total,
+      pages,
+      page: Math.min(prev.page, pages) || 1,
+      limit: PAGE_SIZE,
+    }));
+  }, [isShipmentFilterActive, filteredOrders.length]);
 
   const updateStatus = async (order, nextStatus) => {
     setActionLoadingId(order._id);
@@ -140,7 +206,11 @@ export default function CentralOrdersPage() {
       });
       setSuccess(`Đơn ${order.order_no || order._id} → ${statusLabels[nextStatus] || nextStatus} thành công.`);
       setDetailOrder(prev => (prev?._id === order._id ? { ...prev, status: nextStatus } : prev));
-      await loadOrders(pagination.page);
+      if (shipmentFilter === 'NO_SHIPMENT' || shipmentFilter === 'HAS_SHIPMENT') {
+        await loadAllForShipmentFilter();
+      } else {
+        await loadOrders(pagination.page);
+      }
       return true;
     } catch (err) {
       console.error(err);
@@ -148,6 +218,59 @@ export default function CentralOrdersPage() {
       return false;
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const autoCreateShipmentForOrder = async (order) => {
+    try {
+      const [detailRes, locRes] = await Promise.all([
+        workflowService.getInternalOrder(order._id),
+        workflowService.getLocations({ status: 'ACTIVE', limit: 1000 }),
+      ]);
+      if (!detailRes.success || !detailRes.data) return;
+      const detail = detailRes.data;
+      const allLocs = Array.isArray(locRes?.data) || Array.isArray(locRes?.data?.data)
+        ? (Array.isArray(locRes.data) ? locRes.data : locRes.data.data)
+        : [];
+      const storeOrgId = detail.store_org_unit_id?._id ?? detail.store_org_unit_id;
+      const toLocation = allLocs.find(l => {
+        const org = l.org_unit_id;
+        const id = typeof org === 'object' ? org._id : org;
+        return id && String(id) === String(storeOrgId);
+      });
+      const fromLocation = allLocs.find(l => {
+        const org = l.org_unit_id;
+        const type = typeof org === 'object' ? org.type : org?.type;
+        return (type || '').toUpperCase() === 'KITCHEN';
+      });
+      if (!fromLocation || !toLocation) return;
+      const lines = Array.isArray(detail.lines) ? detail.lines : [];
+      if (!lines.length) return;
+      const payload = {
+        order_id: detail._id,
+        from_location_id: fromLocation._id,
+        to_location_id: toLocation._id,
+        ship_date: new Date().toISOString(),
+        lines: lines.map((line, index) => ({
+          item_id: line.item_id?._id ?? line.item_id,
+          qty: line.qty_ordered ?? 0,
+          uom_id: line.uom_id?._id ?? line.uom_id,
+          order_line_id: line._id || `ord_line_${detail._id}_${index}`,
+        })),
+      };
+      const res = await workflowService.createShipment(payload);
+      if (res.success) {
+        setSuccess(prev => prev
+          ? `${prev} Đã tự tạo phiếu giao (Nháp) cho đơn này.`
+          : 'Đã tự tạo phiếu giao (Nháp) cho đơn này.');
+        setOrderIdsWithShipment(prev => {
+          const next = new Set(prev);
+          next.add(String(detail._id));
+          return next;
+        });
+      }
+    } catch {
+      // im lặng nếu auto tạo phiếu thất bại, tránh chặn luồng duyệt
     }
   };
 
@@ -200,14 +323,14 @@ export default function CentralOrdersPage() {
             value={shipmentFilter}
             onChange={e => setShipmentFilter(e.target.value)}
             className='input-field min-w-[160px]'
-            title='Lọc theo đơn đã có phiếu giao hàng'
+            title='Chưa có phiếu giao'
           >
             <option value='ALL'>Phiếu giao: Tất cả</option>
             <option value='NO_SHIPMENT'>Chưa có phiếu giao</option>
             <option value='HAS_SHIPMENT'>Đã có phiếu giao</option>
           </select>
           <button
-            onClick={() => loadOrders(pagination.page)}
+            onClick={() => (isShipmentFilterActive ? loadAllForShipmentFilter() : loadOrders(pagination.page))}
             className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'
           >
             <RefreshCcw className='h-4 w-4' /> Làm mới
@@ -248,17 +371,19 @@ export default function CentralOrdersPage() {
                 </td>
               </tr>
             )}
-            {!loading && !filteredOrders.length && (
+            {!loading && !ordersToShow.length && (
               <tr>
                 <td colSpan={7} className='px-4 py-6 text-center'>
                   <p className='text-slate-400'>Không có đơn nào.</p>
                   <p className='mt-1 text-xs text-slate-400'>
-                    Thử chọn trạng thái khác hoặc liên hệ Admin nếu bạn là NV Bếp trung tâm.
+                    {isShipmentFilterActive && shipmentFilter === 'NO_SHIPMENT'
+                      ? 'Không có đơn đã phê duyệt nào chưa có phiếu giao.'
+                      : 'Thử chọn trạng thái khác hoặc liên hệ Admin nếu bạn là NV Bếp trung tâm.'}
                   </p>
                 </td>
               </tr>
             )}
-            {filteredOrders.map(order => (
+            {ordersToShow.map(order => (
               <tr key={order._id}>
                 <td className='px-4 py-3 font-medium text-slate-900'>
                   {order.order_no || order._id}
@@ -295,7 +420,7 @@ export default function CentralOrdersPage() {
                   >
                     Chi tiết
                   </button>
-                  {(order.status === 'APPROVED' || order.status === 'PROCESSING') && !orderIdsWithShipment.has(order._id) && (
+                  {(order.status === 'APPROVED' || order.status === 'PROCESSING') && !orderIdsWithShipment.has(String(order._id)) && (
                     <Link
                       to={`/app/central/shipments?create=1&orderId=${order._id}`}
                       className='ml-1 rounded-md border border-orange-200 px-2 py-1 text-xs text-orange-600 hover:bg-orange-50'
@@ -310,15 +435,17 @@ export default function CentralOrdersPage() {
         </table>
       </div>
 
-      {pagination.total > 0 && (
+      {(pagination.total > 0 || (isShipmentFilterActive && filteredOrders.length === 0 && !loading)) && (
         <div className='flex items-center justify-between text-sm text-slate-500'>
           <p>
-            Hiển thị {(pagination.page - 1) * pagination.limit + 1} - {Math.min(pagination.page * pagination.limit, pagination.total)} / {pagination.total}
+            {pagination.total > 0
+              ? `Hiển thị ${(pagination.page - 1) * pagination.limit + 1} - ${Math.min(pagination.page * pagination.limit, pagination.total)} / ${pagination.total}`
+              : 'Không có đơn.'}
           </p>
           <div className='flex items-center gap-2'>
             <button
               type='button'
-              onClick={() => loadOrders(pagination.page - 1)}
+              onClick={() => isShipmentFilterActive ? setPagination(p => ({ ...p, page: p.page - 1 })) : loadOrders(pagination.page - 1)}
               disabled={pagination.page <= 1}
               className='rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50 hover:bg-slate-50'
             >
@@ -327,7 +454,7 @@ export default function CentralOrdersPage() {
             <span>Trang {pagination.page} / {Math.max(1, pagination.pages)}</span>
             <button
               type='button'
-              onClick={() => loadOrders(pagination.page + 1)}
+              onClick={() => isShipmentFilterActive ? setPagination(p => ({ ...p, page: p.page + 1 })) : loadOrders(pagination.page + 1)}
               disabled={pagination.page >= Math.max(1, pagination.pages)}
               className='rounded-md border border-slate-200 px-2 py-1 text-xs disabled:opacity-50 hover:bg-slate-50'
             >
@@ -393,7 +520,7 @@ export default function CentralOrdersPage() {
                     </tbody>
                   </table>
                 </div>
-                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && !orderIdsWithShipment.has(detailOrder._id) && (
+                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && !orderIdsWithShipment.has(String(detailOrder._id)) && (
                   <div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4'>
                     <Link
                       to={`/app/central/shipments?create=1&orderId=${detailOrder._id}`}
@@ -403,7 +530,7 @@ export default function CentralOrdersPage() {
                     </Link>
                   </div>
                 )}
-                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && orderIdsWithShipment.has(detailOrder._id) && (
+                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && orderIdsWithShipment.has(String(detailOrder._id)) && (
                   <div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4'>
                     <Link
                       to='/app/central/shipments'
@@ -426,6 +553,7 @@ export default function CentralOrdersPage() {
                       onClick={async () => {
                         const ok = await updateStatus(detailOrder, 'APPROVED');
                         if (ok) {
+                          autoCreateShipmentForOrder(detailOrder);
                           navigate(`/app/central/production?io=${detailOrder._id}`);
                           setDetailId(null);
                         }

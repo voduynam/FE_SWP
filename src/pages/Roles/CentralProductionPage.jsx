@@ -152,11 +152,12 @@ export default function CentralProductionPage() {
     else setDetailError(res.message || 'Không tìm thấy lệnh sản xuất');
   };
 
-  /** Nhãn đơn hàng nội bộ gắn với lệnh sản xuất (BE có thể trả internal_order_id là object hoặc id) */
+  /** Nhãn đơn hàng: ưu tiên order_no (như Phiếu giao hàng); nếu BE chưa populate thì hiện id để còn thấy đơn liên kết */
   const getOrderLabel = (po) => {
     const io = po?.internal_order_id;
     if (!io) return '—';
-    return typeof io === 'object' ? (io.order_no || io._id || '—') : io;
+    if (typeof io === 'object') return io.order_no || io._id || '—';
+    return io;
   };
 
   const filteredOrders = useMemo(() => {

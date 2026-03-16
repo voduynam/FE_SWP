@@ -7,7 +7,7 @@ import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
 const SHIPMENT_STATUS = {
   DRAFT: 'Nháp',
-  PICKED: 'Đã lấy hàng',
+  PICKED: 'Đã có hàng',
   SHIPPED: 'Đã xuất kho',
   IN_TRANSIT: 'Đang vận chuyển',
   DELIVERED: 'Đã giao đến',
@@ -107,7 +107,6 @@ export default function CentralShipmentsPage() {
           ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
         }),
         workflowService.getProductionOrders({ status: 'DONE', limit: 500 }),
-        workflowService.syncShipmentsPickedFromProduction().catch(() => ({})),
       ]);
       if (res.success && res.data) {
         const list = Array.isArray(res.data.data) ? res.data.data : [];
@@ -128,18 +127,6 @@ export default function CentralShipmentsPage() {
         // Bỏ qua nếu parse production orders lỗi
       }
       setDoneProductionOrderIds(ids);
-
-      const list = Array.isArray(res?.data?.data) ? res.data.data : (Array.isArray(res?.data) ? res.data : []);
-      const getShipmentOrderId = (sh) => String(sh?.order_id?._id ?? sh?.order_id ?? '');
-      const toAutoPick = list.filter(sh => sh?.status === 'DRAFT' && ids.has(getShipmentOrderId(sh)));
-      if (toAutoPick.length > 0) {
-        const toAutoPickIds = new Set(toAutoPick.map(sh => sh._id));
-        Promise.all(toAutoPick.map(sh => workflowService.updateShipmentStatus(sh._id, 'PICKED')))
-          .then(() => {
-            setShipments(prev => prev.map(sh => (toAutoPickIds.has(sh._id) ? { ...sh, status: 'PICKED' } : sh)));
-          })
-          .catch(() => {});
-      }
     } catch {
       setShipments([]);
       setDoneProductionOrderIds(new Set());
@@ -526,8 +513,33 @@ export default function CentralShipmentsPage() {
         setCreating(false);
         return;
       }
+      const newShipmentId = res.data?._id;
+      const orderIdStr = String(selectedOrderId);
+
+      // Nếu đơn đã sản xuất xong (có lệnh DONE) thì chuyển phiếu vừa tạo sang PICKED ngay
+      if (newShipmentId) {
+        try {
+          const poRes = await workflowService.getProductionOrders({ status: 'DONE', limit: 200 });
+          const poList = Array.isArray(poRes?.data) ? poRes.data : (Array.isArray(poRes?.data?.data) ? poRes.data.data : []);
+          const orderHasProductionDone = poList.some(po => {
+            const id = po?.internal_order_id ?? po?.order_id;
+            const oid = typeof id === 'object' ? id?._id : id;
+            return oid != null && String(oid) === orderIdStr;
+          });
+          if (orderHasProductionDone) {
+            await workflowService.updateShipmentStatus(newShipmentId, 'PICKED');
+            setSuccess('Đã tạo phiếu giao hàng và chuyển sang "Đã có hàng" (đơn đã sản xuất xong). Supply có thể chỉ định tuyến ngay.');
+          } else {
+            setSuccess('Đã tạo lô giao hàng thành công (Nháp). Hoàn thành sản xuất đơn này thì phiếu sẽ chuyển "Đã có hàng".');
+          }
+        } catch (_) {
+          setSuccess('Đã tạo lô giao hàng thành công.');
+        }
+      } else {
+        setSuccess('Đã tạo lô giao hàng thành công.');
+      }
+
       closeCreateModal();
-      setSuccess('Đã tạo lô giao hàng thành công. Đơn hàng sẽ tự động chuyển trạng thái SHIPPED.');
       loadShipments(1);
     } catch (err) {
       const msg = err?.response?.data?.message || err?.message || 'Có lỗi khi tạo lô giao hàng';

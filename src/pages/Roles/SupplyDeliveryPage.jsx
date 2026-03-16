@@ -10,6 +10,13 @@ const ROUTE_STATUS = {
   CANCELLED: 'Đã hủy',
 };
 
+const SHIPMENT_STATUS_LABEL = {
+  PICKED: 'Đã có hàng',
+  SHIPPED: 'Đã xuất kho',
+  IN_TRANSIT: 'Đang vận chuyển',
+  DELIVERED: 'Đã giao đến',
+};
+
 const STOP_STATUS = {
   PENDING: 'Chờ',
   ARRIVED: 'Đã đến',
@@ -246,14 +253,33 @@ export default function SupplyDeliveryPage() {
     setSelectedShipmentId('');
     setSelectedStoreLocationId('');
     const load = async () => {
-      const [shRes, driversRes, locRes] = await Promise.all([
+      const [shRes, driversRes, locRes, seedRes] = await Promise.all([
         workflowService.getShipments({ limit: 200 }),
         workflowService.getDrivers({ limit: 100 }),
         workflowService.getLocations({ status: 'ACTIVE', limit: 300 }),
+        workflowService.seedStoreLocations().catch(() => ({ success: false, data: {} })),
       ]);
       setShipments(getList(shRes));
       setDrivers(getList(driversRes));
-      setLocations(getList(locRes));
+      const kitchenLocs = getList(locRes);
+      const seedLocs = Array.isArray(seedRes?.data?.locations) ? seedRes.data.locations : [];
+      const byId = new Map();
+      kitchenLocs.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+      seedLocs.forEach(l => { if (l && l._id) byId.set(l._id, l); });
+      if (seedLocs.length === 0) {
+        try {
+          const orgRes = await workflowService.getOrgUnits({ type: 'STORE', limit: 100 });
+          const storeOrgs = getList(orgRes);
+          for (const org of storeOrgs) {
+            const oid = org._id ?? org.id;
+            if (!oid) continue;
+            const lres = await workflowService.getLocations({ org_unit_id: oid, status: 'ACTIVE', limit: 100 });
+            getList(lres).forEach(l => { if (l && l._id) byId.set(l._id, l); });
+          }
+        } catch (_) {}
+      }
+      const combined = Array.from(byId.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setLocations(combined);
     };
     load();
   }, [createOpen]);
@@ -477,7 +503,7 @@ export default function SupplyDeliveryPage() {
                           <li key={s._id} className='flex items-center justify-between rounded-md bg-slate-50 px-3 py-2'>
                             <span className='font-medium text-slate-800'>{getShipmentLabel(s)}</span>
                             <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${s.status === 'PICKED' ? 'bg-amber-100 text-amber-700' : s.status === 'IN_TRANSIT' ? 'bg-blue-100 text-blue-700' : s.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                              {s.status || '-'}
+                              {SHIPMENT_STATUS_LABEL[s.status] || s.status || '-'}
                             </span>
                           </li>
                         ))}
@@ -622,7 +648,7 @@ export default function SupplyDeliveryPage() {
                     {pickedShipments.map(sh => (
                       <option key={sh._id} value={sh._id}>{sh.shipment_no || sh._id}</option>
                     ))}
-                    {!pickedShipments.length && <option value='' disabled>Không có phiếu PICKED</option>}
+                    {!pickedShipments.length && <option value='' disabled>Không có phiếu đã có hàng</option>}
                   </select>
                 </div>
               </div>

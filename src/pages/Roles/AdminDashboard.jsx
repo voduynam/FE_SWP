@@ -27,7 +27,7 @@ const ORDER_STATUS_LABELS = {
 
 const SHIPMENT_STATUS_LABELS = {
   DRAFT: 'Nháp',
-  PICKED: 'Đã lấy hàng',
+  PICKED: 'Đã có hàng',
   SHIPPED: 'Đã xuất kho',
   IN_TRANSIT: 'Đang vận chuyển',
   DELIVERED: 'Đã giao đến',

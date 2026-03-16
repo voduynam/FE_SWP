@@ -6,7 +6,7 @@ import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
 const SHIPMENT_STATUS = {
   DRAFT: 'Nháp',
-  PICKED: 'Đã lấy hàng',
+  PICKED: 'Đã có hàng',
   SHIPPED: 'Đã xuất kho',
   IN_TRANSIT: 'Đang vận chuyển',
   DELIVERED: 'Đã giao đến',
@@ -50,7 +50,7 @@ function buildShipmentToRouteId(myRoutesList) {
       const ids = stop.shipment_ids || [];
       ids.forEach((s) => {
         const sid = typeof s === 'object' ? s._id : s;
-        if (sid) map[sid] = routeId;
+        if (sid != null) map[String(sid)] = routeId;
       });
     });
   });
@@ -175,7 +175,7 @@ export default function DriverShipmentsPage() {
     }
     setActionLoadingId(shipment._id);
     setSuccess('');
-    const routeId = shipmentToRouteId[shipment._id];
+    let routeId = shipmentToRouteId[String(shipment._id)];
     // Giữ file gửi API, xóa state ngay để không còn hiển thị blob/preview ở "ảnh đã gửi"
     const fileToSend = newStatus === 'DELIVERED' ? deliveryPhotoFile : null;
     if (newStatus === 'DELIVERED') setDeliveryPhotoFile(null);
@@ -194,8 +194,16 @@ export default function DriverShipmentsPage() {
           : newStatus;
       const res = await workflowService.updateShipmentStatus(shipment._id, payload);
       if (res.success) {
-        if (newStatus === 'DELIVERED' && routeId) {
-          await workflowService.updateRouteStatus(routeId, { status: 'COMPLETED' });
+        if (newStatus === 'DELIVERED') {
+          if (!routeId) {
+            const myRoutesRes = await workflowService.getMyDeliveryRoutes({ limit: 50 });
+            const myRoutes = Array.isArray(myRoutesRes?.data) ? myRoutesRes.data : Array.isArray(myRoutesRes?.data?.data) ? myRoutesRes.data.data : getList(myRoutesRes);
+            const map = buildShipmentToRouteId(myRoutes);
+            routeId = map[String(shipment._id)];
+          }
+          if (routeId) {
+            await workflowService.updateRouteStatus(routeId, { status: 'COMPLETED' });
+          }
         }
         setSuccess(`Đã cập nhật: ${SHIPMENT_STATUS[newStatus] || newStatus}`);
         if (newStatus === 'DELIVERED') {

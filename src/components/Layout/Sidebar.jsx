@@ -251,11 +251,6 @@ const menuByRole = {
       path: "/app/supply/dashboard",
     },
     {
-      title: "Tổng hợp đơn hàng",
-      icon: ClipboardList,
-      path: "/app/supply/orders",
-    },
-    {
       title: "Điều phối & giao hàng",
       icon: TruckIcon,
       path: "/app/supply/delivery",
