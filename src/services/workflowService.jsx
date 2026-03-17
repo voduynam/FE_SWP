@@ -327,6 +327,8 @@ export const workflowService = {
     withResult(() => axiosInstance.get('/dashboard/profit', { params })),
   getPerformanceMetrics: params =>
     withResult(() => axiosInstance.get('/performance-metrics', { params })),
+  getPerformanceDashboard: params =>
+    withResult(() => axiosInstance.get('/performance-metrics/dashboard', { params })),
 
   // Admin
   getUsers: params => withResult(() => axiosInstance.get('/users', { params })),
