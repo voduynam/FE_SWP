@@ -74,6 +74,14 @@ export default function FranchiseOrdersPage() {
   const [pendingPaymentInfo, setPendingPaymentInfo] = useState(null);
   const [redirectingToPayOS, setRedirectingToPayOS] = useState(false);
 
+  // Nhận hàng từ đơn đã giao (tạo + confirm Goods Receipt ngay tại màn hình này)
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [receiveOrder, setReceiveOrder] = useState(null);
+  const [receiveShipment, setReceiveShipment] = useState(null);
+  const [receiveLines, setReceiveLines] = useState([]);
+  const [receiveLoading, setReceiveLoading] = useState(false);
+  const [receiveError, setReceiveError] = useState('');
+
   const [newOrder, setNewOrder] = useState({
     order_date: getLocalDateTimeString(),
     is_urgent: false,
@@ -472,6 +480,157 @@ export default function FranchiseOrdersPage() {
     return line.item_id;
   };
 
+  const handleReceiveLineChange = (idx, field, value) => {
+    const num = field === 'qty_received' || field === 'qty_rejected' ? Number(value) || 0 : value;
+    setReceiveLines(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: num };
+      return next;
+    });
+  };
+
+  const openReceiveModal = async order => {
+    setReceiveError('');
+    setReceiveOrder(order);
+    setReceiveShipment(null);
+    setReceiveLines([]);
+    setReceiveOpen(true);
+    setReceiveLoading(true);
+    try {
+      // Tìm shipment đã giao cho đơn này
+      const shipRes = await workflowService.getShipments({
+        order_id: order._id,
+        status: 'SHIPPED',
+        limit: 1,
+      });
+      const raw = shipRes.data;
+      const rows = Array.isArray(raw) ? raw : (raw?.data ?? raw);
+      const list = Array.isArray(rows) ? rows : [];
+      const shipment = list[0];
+      if (!shipRes.success || !shipment) {
+        setReceiveError('Không tìm thấy chuyến giao cho đơn này (trạng thái SHIPPED).');
+        setReceiveLoading(false);
+        return;
+      }
+
+      // Lấy chi tiết shipment + lines để biết số lượng giao theo từng sản phẩm
+      const detailRes = await workflowService.getShipment(shipment._id);
+      if (!detailRes.success || !detailRes.data) {
+        setReceiveError(detailRes.message || 'Không lấy được chi tiết chuyến giao.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const ship = detailRes.data;
+      const lines = (ship.lines || []).map(l => {
+        const qtyShip = typeof l.qty === 'number' ? l.qty : Number(l.qty) || 0;
+        return {
+          shipment_line_id: l._id,
+          item_id: l.item_id?._id || l.item_id,
+          name: l.item_id?.name || l.item_id?.sku || l.item_id || '',
+          sku: l.item_id?.sku,
+          qty_ship: qtyShip,
+          qty_received: qtyShip,
+          qty_rejected: 0,
+        };
+      });
+
+      setReceiveShipment(ship);
+      setReceiveLines(lines);
+    } catch (err) {
+      console.error(err);
+      setReceiveError(err?.response?.data?.message || 'Có lỗi khi tải dữ liệu nhận hàng.');
+    } finally {
+      setReceiveLoading(false);
+    }
+  };
+
+  const submitReceive = async e => {
+    e.preventDefault();
+    if (!receiveShipment || !receiveOrder) return;
+    setReceiveLoading(true);
+    setReceiveError('');
+    try {
+      if (!receiveLines.length) {
+        setReceiveError('Không có dòng hàng để nhận.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const payload = {
+        shipment_id: receiveShipment._id,
+        received_date: new Date().toISOString(),
+        lines: receiveLines
+          .filter(l => l.shipment_line_id && l.item_id)
+          .map(l => ({
+            shipment_line_id: l.shipment_line_id,
+            item_id: l.item_id,
+            qty_received: Math.max(0, Number(l.qty_received) || 0),
+            qty_rejected: Math.max(0, Number(l.qty_rejected) || 0),
+          })),
+      };
+
+      if (!payload.lines.length) {
+        setReceiveError('Mỗi dòng phải có ít nhất số lượng nhận hoặc từ chối > 0.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const invalidLine = payload.lines.find(l => l.qty_received + l.qty_rejected <= 0);
+      if (invalidLine) {
+        setReceiveError('Mỗi dòng phải có ít nhất số lượng nhận hoặc từ chối > 0.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const sumMismatch = payload.lines.some((l, idx) => {
+        const qtyShip = receiveLines[idx]?.qty_ship ?? 0;
+        return l.qty_received + l.qty_rejected !== qtyShip;
+      });
+      if (sumMismatch) {
+        setReceiveError('Tổng SL nhận + từ chối phải đúng bằng SL giao cho từng dòng.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const createRes = await workflowService.createGoodsReceipt(payload);
+      if (!createRes.success || !createRes.data) {
+        setReceiveError(createRes.message || 'Tạo phiếu nhận hàng thất bại.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const receipt = createRes.data;
+      const receiptId = receipt._id;
+      if (!receiptId) {
+        setReceiveError('Không nhận được mã phiếu nhận hàng từ server.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      const confirmRes = await workflowService.confirmGoodsReceipt(receiptId, {
+        status: 'RECEIVED',
+      });
+      if (!confirmRes.success) {
+        setReceiveError(confirmRes.message || 'Xác nhận nhận hàng thất bại.');
+        setReceiveLoading(false);
+        return;
+      }
+
+      setSuccess(`Đã nhận hàng cho đơn ${receiveOrder.order_no || receiveOrder._id}.`);
+      setReceiveOpen(false);
+      setReceiveOrder(null);
+      setReceiveShipment(null);
+      setReceiveLines([]);
+      await loadOrders(pagination.page);
+    } catch (err) {
+      console.error(err);
+      setReceiveError(err?.response?.data?.message || 'Có lỗi khi nhận hàng.');
+    } finally {
+      setReceiveLoading(false);
+    }
+  };
+
   return (
     <div className='min-h-full space-y-6 animate-fade-in'>
       {success && (
@@ -579,6 +738,14 @@ export default function FranchiseOrdersPage() {
                   >
                     Chi tiết
                   </button>
+                  {o.status === 'SHIPPED' && (
+                    <button
+                      onClick={() => openReceiveModal(o)}
+                      className='mr-2 rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-700'
+                    >
+                      Nhận hàng
+                    </button>
+                  )}
                   {o.status === 'DRAFT' && (
                     <>
                       <button
@@ -1026,6 +1193,188 @@ export default function FranchiseOrdersPage() {
                 {redirectingToPayOS ? 'Đang chuyển...' : 'Thanh toán ngay'}
               </button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal nhận hàng trực tiếp từ đơn – Staff cửa hàng */}
+      {receiveOpen && createPortal(
+        <div
+          className='fixed inset-0 z-[10020] flex items-center justify-center bg-slate-900/40 p-4'
+          onClick={() => {
+            if (!receiveLoading) {
+              setReceiveOpen(false);
+              setReceiveOrder(null);
+              setReceiveShipment(null);
+              setReceiveLines([]);
+              setReceiveError('');
+            }
+          }}
+        >
+          <div
+            className='w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl'
+            onClick={e => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center justify-between'>
+              <div>
+                <h2 className='text-lg font-semibold text-slate-900'>Nhận hàng cho đơn nội bộ</h2>
+                <p className='mt-1 text-xs text-slate-500'>
+                  Kiểm tra số lượng thực nhận so với số lượng bếp đã giao. Hệ thống sẽ tự tạo và xác nhận phiếu nhận hàng.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (!receiveLoading) {
+                    setReceiveOpen(false);
+                    setReceiveOrder(null);
+                    setReceiveShipment(null);
+                    setReceiveLines([]);
+                    setReceiveError('');
+                  }
+                }}
+                className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'
+              >
+                ×
+              </button>
+            </div>
+
+            {receiveError && (
+              <p className='mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700'>
+                {receiveError}
+              </p>
+            )}
+
+            {receiveOrder && (
+              <div className='mb-4 grid grid-cols-2 gap-2 text-sm'>
+                <span className='text-slate-500'>Số đơn:</span>
+                <span className='font-medium'>{receiveOrder.order_no || receiveOrder._id}</span>
+                <span className='text-slate-500'>Cửa hàng:</span>
+                <span className='font-medium'>
+                  {receiveOrder.store_org_unit_id?.name || receiveOrder.store_org_unit_id || '-'}
+                </span>
+                <span className='text-slate-500'>Ngày đặt:</span>
+                <span>
+                  {receiveOrder.order_date
+                    ? new Date(receiveOrder.order_date).toLocaleString('vi-VN')
+                    : '-'}
+                </span>
+                <span className='text-slate-500'>Tổng tiền:</span>
+                <span>
+                  {receiveOrder.total_amount != null
+                    ? Number(receiveOrder.total_amount).toLocaleString('vi-VN') + ' đ'
+                    : '-'}
+                </span>
+              </div>
+            )}
+
+            {receiveShipment && (
+              <div className='mb-4 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600'>
+                <div>Lô giao: <span className='font-medium'>{receiveShipment.shipment_no || receiveShipment._id}</span></div>
+                <div>
+                  Ngày giao:{' '}
+                  <span className='font-medium'>
+                    {receiveShipment.ship_date
+                      ? new Date(receiveShipment.ship_date).toLocaleString('vi-VN')
+                      : '-'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={submitReceive} className='space-y-4'>
+              <div className='space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3'>
+                <div className='text-sm font-medium text-slate-700'>
+                  Số lượng nhận theo dòng sản phẩm
+                </div>
+                {receiveLoading && (
+                  <p className='text-xs text-slate-500'>Đang tải dữ liệu nhận hàng...</p>
+                )}
+                {!receiveLoading && receiveLines.length === 0 && (
+                  <p className='text-xs text-slate-400'>
+                    Không có dòng hàng nào trong lô giao. Vui lòng kiểm tra lại.
+                  </p>
+                )}
+                {receiveLines.length > 0 && (
+                  <table className='w-full text-xs'>
+                    <thead className='text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500'>
+                      <tr>
+                        <th className='px-2 py-2'>Sản phẩm</th>
+                        <th className='px-2 py-2 text-right'>SL giao</th>
+                        <th className='px-2 py-2 text-right'>SL nhận</th>
+                        <th className='px-2 py-2 text-right'>SL từ chối</th>
+                      </tr>
+                    </thead>
+                    <tbody className='divide-y divide-slate-100 bg-white'>
+                      {receiveLines.map((line, idx) => (
+                        <tr key={line.shipment_line_id || idx}>
+                          <td className='px-2 py-2'>
+                            <div className='font-medium text-slate-800'>{line.name || '-'}</div>
+                            {line.sku && (
+                              <div className='text-[11px] text-slate-400'>{line.sku}</div>
+                            )}
+                          </td>
+                          <td className='px-2 py-2 text-right'>{line.qty_ship}</td>
+                          <td className='px-2 py-2 text-right'>
+                            <input
+                              type='number'
+                              min={0}
+                              max={line.qty_ship}
+                              step='any'
+                              value={line.qty_received}
+                              onChange={e =>
+                                handleReceiveLineChange(idx, 'qty_received', e.target.value)
+                              }
+                              className='w-24 rounded border border-slate-200 px-2 py-1 text-xs text-right'
+                            />
+                          </td>
+                          <td className='px-2 py-2 text-right'>
+                            <input
+                              type='number'
+                              min={0}
+                              max={line.qty_ship}
+                              step='any'
+                              value={line.qty_rejected}
+                              onChange={e =>
+                                handleReceiveLineChange(idx, 'qty_rejected', e.target.value)
+                              }
+                              className='w-24 rounded border border-slate-200 px-2 py-1 text-xs text-right'
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <p className='text-[11px] text-slate-500'>
+                  Quy tắc: với mỗi dòng, <strong>SL nhận + SL từ chối phải đúng bằng SL giao</strong>.
+                </p>
+              </div>
+
+              <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
+                <button
+                  type='button'
+                  disabled={receiveLoading}
+                  onClick={() => {
+                    setReceiveOpen(false);
+                    setReceiveOrder(null);
+                    setReceiveShipment(null);
+                    setReceiveLines([]);
+                    setReceiveError('');
+                  }}
+                  className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
+                >
+                  Hủy
+                </button>
+                <button
+                  type='submit'
+                  disabled={receiveLoading || !receiveShipment || receiveLines.length === 0}
+                  className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60'
+                >
+                  {receiveLoading ? 'Đang ghi nhận...' : 'Xác nhận nhận hàng'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>,
         document.body
