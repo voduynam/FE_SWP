@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, Fragment, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCcw, Search, Package, ArrowUpDown, PlusCircle, History } from 'lucide-react';
+import { RefreshCcw, Search, Package, ArrowUpDown, PlusCircle, History, AlertTriangle, ChevronDown } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { useAuth } from '../../contexts/AuthContext';
+import { getQtyAvailable } from '../../utils/inventoryHelpers';
 
 const PAGE_SIZE = 15;
 
@@ -35,6 +37,38 @@ const txnColor = {
   CONSUMPTION: 'text-red-600',
 };
 
+const severityColor = {
+  EXPIRED: 'bg-red-100 text-red-700',
+  CRITICAL: 'bg-orange-100 text-orange-700',
+  HIGH: 'bg-amber-100 text-amber-700',
+  MEDIUM: 'bg-sky-100 text-sky-700',
+};
+
+const severityLabel = {
+  EXPIRED: 'Hết hạn',
+  CRITICAL: '< 3 ngày',
+  HIGH: '3-7 ngày',
+  MEDIUM: '7-14 ngày',
+};
+
+const EXPIRY_DAYS_THRESHOLD = 14;
+
+const getLotExpiryStatus = lotRow => {
+  const expDate = lotRow?.lot_id?.exp_date ?? lotRow?.exp_date ?? null;
+  if (!expDate) return null;
+
+  const now = new Date();
+  const daysUntilExpiry = Math.ceil((new Date(expDate) - now) / (1000 * 60 * 60 * 24));
+
+  if (daysUntilExpiry < 0) return { severity: 'EXPIRED', label: severityLabel.EXPIRED, days: daysUntilExpiry };
+  if (daysUntilExpiry <= 2) return { severity: 'CRITICAL', label: severityLabel.CRITICAL, days: daysUntilExpiry };
+  if (daysUntilExpiry <= 5) return { severity: 'HIGH', label: severityLabel.HIGH, days: daysUntilExpiry };
+  if (daysUntilExpiry <= EXPIRY_DAYS_THRESHOLD) {
+    return { severity: 'MEDIUM', label: severityLabel.MEDIUM, days: daysUntilExpiry };
+  }
+  return null;
+};
+
 const getItemName = row => {
   if (!row) return '-';
   if (typeof row === 'object') return row.name || row.sku || row._id || '-';
@@ -52,6 +86,12 @@ const getLotCode = row => {
 };
 
 export default function ManagerInventoryPage() {
+  const { user } = useAuth();
+  const roleCodes = Array.isArray(user?.roles)
+    ? user.roles.map(r => String(r.code || '').toUpperCase())
+    : [];
+  const canAdjust = roleCodes.includes('MANAGER') || roleCodes.includes('ADMIN');
+
   const [tab, setTab] = useState('balances');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -62,6 +102,10 @@ export default function ManagerInventoryPage() {
 
   // Balances
   const [balances, setBalances] = useState([]);
+  const [locationFilter, setLocationFilter] = useState('ALL');
+  const [filterLocations, setFilterLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState({});
   const [balPag, setBalPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [balSearch, setBalSearch] = useState('');
   const [hideZero, setHideZero] = useState(true);
@@ -71,6 +115,11 @@ export default function ManagerInventoryPage() {
   const [txnPag, setTxnPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [txnTypeFilter, setTxnTypeFilter] = useState('');
   const [txnSearch, setTxnSearch] = useState('');
+
+  // Alerts
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [lowStockAlerts, setLowStockAlerts] = useState([]);
+  const [expiryAlerts, setExpiryAlerts] = useState([]);
 
   // Adjust modal
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -94,23 +143,105 @@ export default function ManagerInventoryPage() {
     if (res.success) setSummary(res.data);
   };
 
+  /* ── Alerts ── */
+  const loadAlerts = async () => {
+    setAlertsLoading(true);
+    try {
+      const [lowRes, expRes] = await Promise.all([
+        workflowService.getAlertsLowStock({}),
+        workflowService.getAlertsExpiry({ days_threshold: 14 }),
+      ]);
+
+      if (lowRes.success) {
+        const list = Array.isArray(lowRes.data)
+          ? lowRes.data
+          : Array.isArray(lowRes.data?.alerts)
+            ? lowRes.data.alerts
+            : [];
+        setLowStockAlerts(list);
+      }
+      if (expRes.success) {
+        const list = Array.isArray(expRes.data)
+          ? expRes.data
+          : Array.isArray(expRes.data?.alerts)
+            ? expRes.data.alerts
+            : [];
+        setExpiryAlerts(list);
+      }
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const loadFilterLocations = async () => {
+    setLocationsLoading(true);
+    try {
+      const res = await workflowService.getLocations({ limit: 5000 });
+      if (!res.success) {
+        setFilterLocations([]);
+        return;
+      }
+      const list = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.data)
+          ? res.data.data
+          : [];
+      setFilterLocations(list);
+    } finally {
+      setLocationsLoading(false);
+    }
+  };
+
   /* ── Balances ── */
-  const loadBalances = async (page = 1) => {
+  const loadBalances = useCallback(async (page = 1, location_id_override) => {
     setLoading(true);
     setError('');
     try {
-      const res = await workflowService.getInventoryBalancesPaginated({ page, limit: PAGE_SIZE });
-      if (res.success && res.data) {
-        const list = Array.isArray(res.data.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
-        setBalances(list);
-        const p = res.data.pagination ?? {};
-        setBalPag({ page: p.page || page, limit: p.limit || PAGE_SIZE, total: p.total || list.length, pages: p.pages || 1 });
+      const location_id =
+        location_id_override !== undefined
+          ? location_id_override
+          : locationFilter === 'ALL'
+            ? undefined
+            : locationFilter;
+
+      // FE cần gom nhóm theo (location,item) + hiển thị theo từng kho,
+      // nên lấy đầy đủ data trước khi group (tránh bị vỡ group do BE phân trang).
+      const allRows = [];
+      const limit = 200;
+      let curPage = 1;
+      let totalPages = 1;
+
+      while (curPage <= totalPages) {
+        const params = { page: curPage, limit };
+        if (location_id) params.location_id = location_id;
+
+        const res = await workflowService.getInventoryBalancesPaginated(params);
+        if (!res.success) {
+          setError(res.message || 'Không tải được tồn kho');
+          setBalances([]);
+          return;
+        }
+
+        const rows = Array.isArray(res.data?.data)
+          ? res.data.data
+          : Array.isArray(res.data)
+            ? res.data
+            : [];
+        allRows.push(...rows);
+
+        const p = res.data?.pagination ?? {};
+        totalPages = p.pages || curPage;
+        curPage++;
       }
+      setBalances(allRows);
+      setExpandedGroupKeys({});
+      // balPag.page is used for FE pagination after grouping; total/pages computed in-memory.
+      setBalPag(prev => ({ ...prev, page }));
     } finally { setLoading(false); }
-  };
+  }, [locationFilter]);
 
   /* ── Transactions ── */
-  const loadTxns = async (page = 1) => {
+  const loadTxns = useCallback(async (page = 1) => {
     setLoading(true);
     setError('');
     try {
@@ -123,27 +254,106 @@ export default function ManagerInventoryPage() {
         const p = res.data.pagination ?? {};
         setTxnPag({ page: p.page || page, limit: p.limit || PAGE_SIZE, total: p.total || list.length, pages: p.pages || 1 });
       }
-    } finally { setLoading(false); }
-  };
+    } finally {
+      setLoading(false);
+    }
+  }, [txnTypeFilter]);
 
+  // Init once on mount.
   useEffect(() => {
     loadSummary();
-    loadBalances(1);
+    loadFilterLocations();
+    loadAlerts();
   }, []);
 
-  useEffect(() => { if (tab === 'transactions') loadTxns(1); }, [tab, txnTypeFilter]);
+  // Reload balances when location filter changes.
+  useEffect(() => {
+    loadBalances(1);
+  }, [loadBalances]);
 
-  const filteredBalances = useMemo(() => {
-    let list = balances;
-    if (hideZero) list = list.filter(r => (r.qty_on_hand ?? 0) !== 0);
-    const s = (balSearch || '').toLowerCase();
-    if (!s) return list;
-    return list.filter(r => {
-      const name = getItemName(r.item_id).toLowerCase();
-      const loc = getLocName(r.location_id).toLowerCase();
-      return name.includes(s) || loc.includes(s);
+  useEffect(() => {
+    if (tab === 'transactions') loadTxns(1);
+  }, [tab, loadTxns]);
+
+  const groupedBalances = useMemo(() => {
+    const map = new Map();
+
+    for (const row of balances) {
+      const locId = row.location_id?._id ?? row.location_id ?? '';
+      const itemId = row.item_id?._id ?? row.item_id ?? '';
+      const key = `${locId}__${itemId}`;
+
+      // Optionally hide empty rows before summing.
+      if (hideZero && (row.qty_on_hand ?? 0) === 0) continue;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          location_id: row.location_id,
+          item_id: row.item_id,
+          qty_on_hand: 0,
+          qty_reserved: 0,
+          qty_available: 0,
+          lots: [],
+        });
+      }
+
+      const g = map.get(key);
+      g.qty_on_hand += row.qty_on_hand ?? 0;
+      g.qty_reserved += row.qty_reserved ?? 0;
+      g.qty_available += getQtyAvailable(row);
+      g.lots.push(row);
+    }
+
+    // FIFO-ish: oldest mfg_date first
+    const groups = Array.from(map.values()).map(g => {
+      g.lots.sort((a, b) => {
+        const ad = a.lot_id?.mfg_date ? new Date(a.lot_id.mfg_date).getTime() : Infinity;
+        const bd = b.lot_id?.mfg_date ? new Date(b.lot_id.mfg_date).getTime() : Infinity;
+        return ad - bd;
+      });
+      return g;
     });
-  }, [balances, balSearch, hideZero]);
+
+    groups.sort((a, b) => {
+      const la = getLocName(a.location_id).toLowerCase();
+      const lb = getLocName(b.location_id).toLowerCase();
+      if (la !== lb) return la.localeCompare(lb);
+      return getItemName(a.item_id).toLowerCase().localeCompare(getItemName(b.item_id).toLowerCase());
+    });
+
+    // If hideZero is on, hide full groups that end up at 0 after aggregation.
+    if (hideZero) return groups.filter(g => (g.qty_on_hand ?? 0) !== 0);
+    return groups;
+  }, [balances, hideZero]);
+
+  const filteredGroups = useMemo(() => {
+    const s = (balSearch || '').toLowerCase().trim();
+    if (!s) return groupedBalances;
+
+    return groupedBalances.filter(g => {
+      const itemObj = g.item_id;
+      const itemName = getItemName(itemObj).toLowerCase();
+      const sku = typeof itemObj === 'object' ? String(itemObj.sku || '').toLowerCase() : '';
+      const loc = getLocName(g.location_id).toLowerCase();
+      return itemName.includes(s) || sku.includes(s) || loc.includes(s);
+    });
+  }, [groupedBalances, balSearch]);
+
+  const showLocationColumn = locationFilter === 'ALL';
+  const balanceTableColSpan = showLocationColumn ? 7 : 6;
+
+  const groupPages = Math.max(1, Math.ceil(filteredGroups.length / PAGE_SIZE));
+  const currentGroupPage = Math.min(balPag.page, groupPages);
+  const pagedGroups = useMemo(() => {
+    const start = (currentGroupPage - 1) * PAGE_SIZE;
+    return filteredGroups.slice(start, start + PAGE_SIZE);
+  }, [filteredGroups, currentGroupPage]);
+
+  useEffect(() => {
+    // Keep pagination consistent when searching/filtering.
+    setBalPag(prev => ({ ...prev, page: 1 }));
+  }, [balSearch, hideZero]);
 
   const filteredTxns = useMemo(() => {
     const s = (txnSearch || '').toLowerCase();
@@ -186,20 +396,39 @@ export default function ManagerInventoryPage() {
     setAdjusting(true);
     setAdjustError('');
     const qty = Number(adjustForm.qty_adjustment);
-    if (!adjustForm.location_id || !adjustForm.item_id || !qty) {
-      setAdjustError('Vui lòng chọn vị trí, sản phẩm và nhập số lượng.');
+    const reasonTrim = (adjustForm.reason || '').trim();
+
+    if (!canAdjust) {
+      setAdjustError('Bạn không có quyền điều chỉnh tồn kho.');
+      setAdjusting(false);
+      return;
+    }
+
+    if (!adjustForm.location_id || !adjustForm.item_id || !Number.isFinite(qty) || qty === 0) {
+      setAdjustError('Vui lòng chọn vị trí, sản phẩm và nhập số lượng điều chỉnh (khác 0).');
+      setAdjusting(false);
+      return;
+    }
+
+    if (!reasonTrim) {
+      setAdjustError('Vui lòng nhập lý do điều chỉnh.');
       setAdjusting(false);
       return;
     }
     const selectedItem = items.find(i => i._id === adjustForm.item_id);
     const uom_id = selectedItem?.base_uom_id?._id || selectedItem?.base_uom_id || selectedItem?.uom_id;
+    if (!uom_id) {
+      setAdjustError('Không xác định được đơn vị tính của sản phẩm.');
+      setAdjusting(false);
+      return;
+    }
     const payload = {
       location_id: adjustForm.location_id,
       item_id: adjustForm.item_id,
-      qty_adjustment: qty,
+      qty,
       uom_id: uom_id || undefined,
-      reason: adjustForm.reason || '',
-      adjustment_type: adjustForm.adjustment_type,
+      // BE chỉ nhận `reason`; thêm loại điều chỉnh để dễ audit
+      reason: adjustForm.adjustment_type ? `${adjustForm.adjustment_type}: ${reasonTrim}` : reasonTrim,
     };
     if (adjustForm.lot_id) payload.lot_id = adjustForm.lot_id;
     const res = await workflowService.adjustInventory(payload);
@@ -217,6 +446,7 @@ export default function ManagerInventoryPage() {
   const tabs = [
     { key: 'balances', label: 'Tồn kho', icon: Package },
     { key: 'transactions', label: 'Lịch sử giao dịch', icon: History },
+    { key: 'alerts', label: 'Cảnh báo', icon: AlertTriangle },
   ];
 
   return (
@@ -228,10 +458,17 @@ export default function ManagerInventoryPage() {
           <p className='text-sm text-slate-500'>Quản lý tồn kho, giao dịch và điều chỉnh</p>
         </div>
         <div className='flex gap-2'>
-          <button onClick={() => setAdjustOpen(true)} className='inline-flex items-center gap-1 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-700'>
-            <PlusCircle className='h-4 w-4' /> Điều chỉnh
-          </button>
-          <button onClick={() => { loadSummary(); if (tab === 'balances') loadBalances(balPag.page); else loadTxns(txnPag.page); }} className='inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50'>
+          {canAdjust && (
+            <button onClick={() => setAdjustOpen(true)} className='inline-flex items-center gap-1 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-700'>
+              <PlusCircle className='h-4 w-4' /> Điều chỉnh
+            </button>
+          )}
+          <button onClick={() => {
+            loadSummary();
+            if (tab === 'balances') loadBalances(balPag.page);
+            else if (tab === 'transactions') loadTxns(txnPag.page);
+            else loadAlerts();
+          }} className='inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50'>
             <RefreshCcw className='h-4 w-4' /> Làm mới
           </button>
         </div>
@@ -239,9 +476,9 @@ export default function ManagerInventoryPage() {
 
       {success && <div className='rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700'>{success}</div>}
       {error && <p className='text-sm text-red-600'>{error}</p>}
-      {tab === 'balances' && filteredBalances.some(r => (r.qty_on_hand ?? 0) < 0) && (
+      {tab === 'balances' && filteredGroups.some(r => (r.qty_on_hand ?? 0) < 0) && (
         <div className='rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800'>
-          Có {filteredBalances.filter(r => (r.qty_on_hand ?? 0) < 0).length} dòng tồn âm. Vui lòng dùng <strong>Điều chỉnh</strong> để sửa.
+          Có {filteredGroups.filter(r => (r.qty_on_hand ?? 0) < 0).length} nhóm tồn âm. Vui lòng dùng <strong>Điều chỉnh</strong> để sửa.
         </div>
       )}
 
@@ -274,9 +511,34 @@ export default function ManagerInventoryPage() {
       {tab === 'balances' && (
         <div className='space-y-3'>
           <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+            <div className='min-w-[220px]'>
+              <select
+                value={locationFilter}
+                onChange={e => {
+                  const v = e.target.value;
+                  setLocationFilter(v);
+                }}
+                disabled={locationsLoading}
+                className='w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+              >
+                <option value='ALL'>Tất cả kho</option>
+                {filterLocations.map(l => (
+                  <option key={l._id} value={l._id}>
+                    {l.name || l.code || l._id}
+                  </option>
+                ))}
+              </select>
+              {locationsLoading && <p className='mt-0.5 text-[11px] text-slate-400'>Đang tải danh sách kho...</p>}
+            </div>
+
             <div className='relative flex-1'>
               <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
-              <input value={balSearch} onChange={e => setBalSearch(e.target.value)} placeholder='Tìm theo sản phẩm / vị trí...' className='w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-orange-300 focus:ring-1 focus:ring-orange-300' />
+              <input
+                value={balSearch}
+                onChange={e => setBalSearch(e.target.value)}
+                placeholder='Tìm theo sản phẩm / SKU...'
+                className='w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-orange-300 focus:ring-1 focus:ring-orange-300'
+              />
             </div>
             <label className='flex items-center gap-2 text-sm text-slate-600 cursor-pointer'>
               <input type='checkbox' checked={hideZero} onChange={e => setHideZero(e.target.checked)} className='rounded border-slate-300' />
@@ -289,7 +551,9 @@ export default function ManagerInventoryPage() {
               <thead className='border-b border-slate-200 bg-slate-50/80 text-left'>
                 <tr>
                   <th className='px-4 py-3 font-medium text-slate-600'>Sản phẩm</th>
-                  <th className='px-4 py-3 font-medium text-slate-600'>Vị trí</th>
+                  {showLocationColumn && (
+                    <th className='px-4 py-3 font-medium text-slate-600'>Vị trí</th>
+                  )}
                   <th className='px-4 py-3 font-medium text-slate-600'>Lô</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Tồn kho</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Đặt trước</th>
@@ -298,54 +562,233 @@ export default function ManagerInventoryPage() {
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100'>
-                {loading && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-                {!loading && !filteredBalances.length && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Không có dữ liệu</td></tr>}
-                {!loading && filteredBalances.map((r, idx) => {
-                  const qty = r.qty_on_hand ?? 0;
-                  const avail = r.qty_available ?? (qty - (r.qty_reserved ?? 0));
-                  const isNegative = qty < 0;
-                  const locId = r.location_id?._id ?? r.location_id;
-                  const itemId = r.item_id?._id ?? r.item_id;
-                  const lotId = r.lot_id?._id ?? r.lot_id ?? '';
-                  return (
-                    <tr key={r._id || idx} className={`hover:bg-slate-50/50 ${isNegative ? 'bg-red-50/50' : ''}`}>
-                      <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(r.item_id)}</td>
-                      <td className='px-4 py-3 text-slate-700'>{getLocName(r.location_id)}</td>
-                      <td className='px-4 py-3 text-slate-500 text-xs'>{getLotCode(r.lot_id)}</td>
-                      <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>{qty}</td>
-                      <td className='px-4 py-3 text-right text-slate-500'>{r.qty_reserved ?? 0}</td>
-                      <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{avail}</td>
-                      <td className='px-4 py-3 text-right'>
-                        <button
-                          type='button'
-                          onClick={async () => {
-                            adjustFromRowRef.current = true;
-                            setAdjustForm({ location_id: locId, item_id: itemId, lot_id: lotId, qty_adjustment: '', reason: '', adjustment_type: 'COUNT_ADJUSTMENT' });
-                            if (itemId) {
-                              const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
-                              const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
-                              setAdjustLots(list);
-                            } else setAdjustLots([]);
-                            setAdjustOpen(true);
-                          }}
-                          className='rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
-                        >
-                          Điều chỉnh
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {loading && (
+                  <tr>
+                    <td colSpan={balanceTableColSpan} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td>
+                  </tr>
+                )}
+                {!loading && !pagedGroups.length && (
+                  <tr>
+                    <td colSpan={balanceTableColSpan} className='px-4 py-6 text-center text-slate-400'>
+                      Không có dữ liệu
+                    </td>
+                  </tr>
+                )}
+                {!loading &&
+                  pagedGroups.map(g => {
+                    const locId = g.location_id?._id ?? g.location_id;
+                    const itemId = g.item_id?._id ?? g.item_id;
+                    const qty = g.qty_on_hand ?? 0;
+                    const reserved = g.qty_reserved ?? 0;
+                    const avail = g.qty_available ?? (qty - reserved);
+                    const isNegative = qty < 0;
+                    const expanded = !!expandedGroupKeys[g.key];
+
+                    const lotsCount = g.lots.length;
+                    const severityOrder = { EXPIRED: 0, CRITICAL: 1, HIGH: 2, MEDIUM: 3 };
+                    const worstStatus = g.lots
+                      .map(l => getLotExpiryStatus(l))
+                      .filter(Boolean)
+                      .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])[0];
+
+                    return (
+                      <Fragment key={g.key}>
+                        <tr className={`hover:bg-slate-50/50 ${isNegative ? 'bg-red-50/50' : ''}`}>
+                          <td className='px-4 py-3 font-medium text-slate-900'>
+                            <div className='flex items-center gap-2'>
+                              <span>{getItemName(g.item_id)}</span>
+                              {typeof g.item_id === 'object' && g.item_id?.sku && (
+                                <span className='rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600'>
+                                  {g.item_id.sku}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          {showLocationColumn && (
+                            <td className='px-4 py-3 text-slate-700'>{getLocName(g.location_id)}</td>
+                          )}
+                          <td className='px-4 py-3 text-slate-500 text-xs'>
+                            <button
+                              type='button'
+                              onClick={() => setExpandedGroupKeys(prev => ({ ...prev, [g.key]: !expanded }))}
+                              className='inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'
+                            >
+                              <ChevronDown className={`h-3.5 w-3.5 transition ${expanded ? 'rotate-180' : ''}`} />
+                              {lotsCount} lô
+                              {worstStatus && (
+                                <span
+                                  className={`ml-1 rounded-full px-2 py-0.5 text-xs font-semibold ${severityColor[worstStatus.severity] || 'bg-slate-100 text-slate-600'}`}
+                                >
+                                  {worstStatus.label}
+                                </span>
+                              )}
+                            </button>
+                          </td>
+                          <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>{qty}</td>
+                          <td className='px-4 py-3 text-right text-slate-500'>{reserved}</td>
+                          <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {avail}
+                          </td>
+                          <td className='px-4 py-3 text-right'>
+                            {canAdjust && (
+                              <button
+                                type='button'
+                                onClick={async () => {
+                                  adjustFromRowRef.current = true;
+                                  // Điều chỉnh tồn chung (không bắt buộc chọn lot)
+                                  setAdjustForm({
+                                    location_id: locId,
+                                    item_id: itemId,
+                                    lot_id: '',
+                                    qty_adjustment: '',
+                                    reason: '',
+                                    adjustment_type: 'COUNT_ADJUSTMENT',
+                                  });
+                                  if (itemId) {
+                                    const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
+                                    const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
+                                    setAdjustLots(list);
+                                  } else setAdjustLots([]);
+                                  setAdjustOpen(true);
+                                }}
+                                className='rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                              >
+                                Điều chỉnh
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+
+                        {expanded && (
+                          <tr>
+                            <td colSpan={balanceTableColSpan} className='bg-white'>
+                              <div className='px-4 py-3'>
+                                <div className='flex items-center justify-between gap-3'>
+                                  <div className='text-sm font-medium text-slate-900'>
+                                    Chi tiết theo lô
+                                  </div>
+                                </div>
+
+                                <div className='mt-3 overflow-x-auto'>
+                                  <table className='w-full text-sm'>
+                                    <thead>
+                                      <tr className='border-b border-slate-200 text-left'>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600'>Lô</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600'>MFG</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600'>Tình trạng</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Tồn</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Đặt trước</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Khả dụng</th>
+                                        {canAdjust && <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right w-28'>Thao tác</th>}
+                                      </tr>
+                                    </thead>
+                                    <tbody className='divide-y divide-slate-100'>
+                                      {g.lots.map((l, i) => {
+                                        const lotId = l.lot_id?._id ?? l.lot_id ?? '';
+                                        const lotQty = l.qty_on_hand ?? 0;
+                                        const lotReserved = l.qty_reserved ?? 0;
+                                        const lotAvail = getQtyAvailable(l);
+                                        const lotNegative = lotQty < 0;
+                                        const status = getLotExpiryStatus(l);
+                                        return (
+                                          <tr key={lotId || `${g.key}_${i}`} className='hover:bg-slate-50/50'>
+                                            <td className='px-2 py-2 text-xs text-slate-900'>
+                                              <span className='font-medium'>{getLotCode(l.lot_id)}</span>
+                                            </td>
+                                            <td className='px-2 py-2 text-xs text-slate-600'>
+                                              {l.lot_id?.mfg_date ? new Date(l.lot_id.mfg_date).toLocaleDateString('vi-VN') : '-'}
+                                            </td>
+                                            <td className='px-2 py-2 text-xs text-slate-600'>
+                                              {status ? (
+                                                <div className='flex flex-col gap-1'>
+                                                  <span
+                                                    className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                                      severityColor[status.severity] || 'bg-slate-100 text-slate-600'
+                                                    }`}
+                                                  >
+                                                    {status.label}
+                                                  </span>
+                                                  <span className={`text-[11px] ${status.severity === 'EXPIRED' ? 'text-red-600' : 'text-amber-700'}`}>
+                                                    {status.days < 0
+                                                      ? `Đã hết ${Math.abs(status.days)} ngày`
+                                                      : `Còn ${status.days} ngày`}
+                                                  </span>
+                                                </div>
+                                              ) : (
+                                                <span className='text-[11px] text-slate-400'>Không cảnh báo</span>
+                                              )}
+                                            </td>
+                                            <td className={`px-2 py-2 text-right text-xs font-medium ${lotNegative ? 'text-red-600' : 'text-slate-900'}`}>
+                                              {lotQty}
+                                            </td>
+                                            <td className='px-2 py-2 text-right text-xs text-slate-600'>{lotReserved}</td>
+                                            <td className={`px-2 py-2 text-right text-xs font-semibold ${lotAvail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                              {lotAvail}
+                                            </td>
+                                            {canAdjust && (
+                                              <td className='px-2 py-2 text-right'>
+                                                <button
+                                                  type='button'
+                                                  onClick={async () => {
+                                                    adjustFromRowRef.current = true;
+                                                    setAdjustForm({
+                                                      location_id: locId,
+                                                      item_id: itemId,
+                                                      lot_id: lotId,
+                                                      qty_adjustment: '',
+                                                      reason: '',
+                                                      adjustment_type: 'COUNT_ADJUSTMENT',
+                                                    });
+                                                    if (itemId) {
+                                                      const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
+                                                      const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
+                                                      setAdjustLots(list);
+                                                    } else setAdjustLots([]);
+                                                    setAdjustOpen(true);
+                                                  }}
+                                                  className='rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                                                >
+                                                  Điều chỉnh
+                                                </button>
+                                              </td>
+                                            )}
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
 
-          {balPag.pages > 1 && (
+          {groupPages > 1 && (
             <div className='flex items-center justify-between text-sm text-slate-500'>
-              <span>Trang {balPag.page}/{balPag.pages} ({balPag.total} bản ghi)</span>
+              <span>
+                Trang {currentGroupPage}/{groupPages} ({filteredGroups.length} nhóm sản phẩm)
+              </span>
               <div className='flex gap-1'>
-                <button disabled={balPag.page <= 1} onClick={() => loadBalances(balPag.page - 1)} className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'>Trước</button>
-                <button disabled={balPag.page >= balPag.pages} onClick={() => loadBalances(balPag.page + 1)} className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'>Sau</button>
+                <button
+                  disabled={currentGroupPage <= 1}
+                  onClick={() => setBalPag(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+                  className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'
+                >
+                  Trước
+                </button>
+                <button
+                  disabled={currentGroupPage >= groupPages}
+                  onClick={() => setBalPag(prev => ({ ...prev, page: Math.min(groupPages, prev.page + 1) }))}
+                  className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'
+                >
+                  Sau
+                </button>
               </div>
             </div>
           )}
@@ -413,6 +856,80 @@ export default function ManagerInventoryPage() {
         </div>
       )}
 
+      {/* === Alerts Tab === */}
+      {tab === 'alerts' && (
+        <div className='space-y-3'>
+          <div className='flex items-center justify-between'>
+            <div>
+              <h2 className='text-base font-semibold text-slate-900'>Cảnh báo tồn kho</h2>
+              <p className='text-sm text-slate-500'>Tồn kho thấp và lô sắp hết hạn</p>
+            </div>
+            <div className='text-sm text-slate-500'>
+              {alertsLoading ? 'Đang tải...' : `${lowStockAlerts.length + expiryAlerts.length} cảnh báo`}
+            </div>
+          </div>
+
+          <div className='grid gap-4 md:grid-cols-2'>
+            <div className='rounded-xl border border-slate-200 bg-white'>
+              <div className='border-b border-slate-200 px-4 py-3'>
+                <h3 className='text-sm font-semibold text-slate-900'>Tồn kho thấp</h3>
+                <p className='text-xs text-slate-500'>Sản phẩm dưới mức tối thiểu</p>
+              </div>
+              <div className='divide-y divide-slate-100'>
+                {alertsLoading && <p className='px-4 py-6 text-sm text-slate-400'>Đang tải...</p>}
+                {!alertsLoading && !lowStockAlerts.length && <p className='px-4 py-6 text-sm text-slate-400'>Không có cảnh báo</p>}
+                {!alertsLoading &&
+                  lowStockAlerts.map((r, idx) => (
+                    <div key={r._id || r.alert_id || idx} className='px-4 py-3'>
+                      <div className='flex items-center justify-between'>
+                        <span className='text-sm font-medium text-slate-900'>
+                          {r.item?.name || r.item_name || getItemName(r.item_id)}
+                        </span>
+                        <span className='rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700'>Thấp</span>
+                      </div>
+                      <p className='mt-0.5 text-xs text-slate-500'>
+                        Khả dụng: {r.qty_available ?? '-'} | Tối thiểu: {r.min_stock ?? r.min_stock_level ?? '-'}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className='rounded-xl border border-slate-200 bg-white'>
+              <div className='border-b border-slate-200 px-4 py-3'>
+                <h3 className='text-sm font-semibold text-slate-900'>Sắp hết hạn</h3>
+                <p className='text-xs text-slate-500'>Lô hàng sắp hết hạn sử dụng</p>
+              </div>
+              <div className='divide-y divide-slate-100'>
+                {alertsLoading && <p className='px-4 py-6 text-sm text-slate-400'>Đang tải...</p>}
+                {!alertsLoading && !expiryAlerts.length && <p className='px-4 py-6 text-sm text-slate-400'>Không có cảnh báo</p>}
+                {!alertsLoading &&
+                  expiryAlerts.map((r, idx) => (
+                    <div key={r._id || r.alert_id || idx} className='px-4 py-3'>
+                      <div className='flex items-center justify-between'>
+                        <span className='text-sm font-medium text-slate-900'>
+                          {r.item?.name || r.lot?.item_id?.name || getItemName(r.item_id)}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${severityColor[r.severity] || 'bg-slate-100 text-slate-600'}`}>
+                          {severityLabel[r.severity] || r.severity || `${r.days_until_expiry ?? '?'} ngày`}
+                        </span>
+                      </div>
+                      <p className='mt-0.5 text-xs text-slate-500'>
+                        Lô: {r.lot?.lot_code || r.lot_code || '-'} | Ngày hết hạn:{' '}
+                        {r.lot?.exp_date
+                          ? new Date(r.lot.exp_date).toLocaleDateString('vi-VN')
+                          : r.exp_date
+                            ? new Date(r.exp_date).toLocaleDateString('vi-VN')
+                            : '-'}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* === Adjust Modal === */}
       {adjustOpen && createPortal(
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40' onClick={() => setAdjustOpen(false)}>
@@ -452,7 +969,7 @@ export default function ManagerInventoryPage() {
                           <option value=''>-- Không có lô / Tồn chung --</option>
                           {adjustLots.map(l => (
                             <option key={l._id} value={l._id}>
-                              {l.lot_code || l._id}{l.exp_date ? ` (HSD: ${new Date(l.exp_date).toLocaleDateString('vi-VN')})` : ''}
+                              {l.lot_code || l._id}{l.exp_date ? ` (Ngày hết hạn: ${new Date(l.exp_date).toLocaleDateString('vi-VN')})` : ''}
                             </option>
                           ))}
                         </select>
@@ -478,8 +995,14 @@ export default function ManagerInventoryPage() {
                 </div>
               </div>
               <div>
-                <label className='block text-sm font-medium text-slate-700'>Lý do</label>
-                <textarea value={adjustForm.reason} onChange={e => setAdjustForm(f => ({ ...f, reason: e.target.value }))} rows={2} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' placeholder='Mô tả lý do điều chỉnh...' />
+                <label className='block text-sm font-medium text-slate-700'>Lý do điều chỉnh *</label>
+                <textarea
+                  value={adjustForm.reason}
+                  onChange={e => setAdjustForm(f => ({ ...f, reason: e.target.value }))}
+                  rows={2}
+                  className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+                  placeholder='Mô tả lý do điều chỉnh (bắt buộc)...'
+                />
               </div>
               <div className='flex justify-end gap-2 border-t border-slate-200 pt-3'>
                 <button type='button' onClick={() => setAdjustOpen(false)} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>

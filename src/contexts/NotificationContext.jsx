@@ -23,13 +23,30 @@ export const NotificationProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const roles = useMemo(
+  const feRoleCodes = useMemo(
     () =>
       Array.isArray(user?.roles)
         ? user.roles.map(r => String(r.code || '').trim().toUpperCase())
         : [],
     [user]
   );
+
+  // Socket.io rooms are created with backend role codes (e.g. CHEF, STORE_STAFF),
+  // but FE roles are normalized (e.g. CENTRAL_KITCHEN_STAFF, FRANCHISE_STORE_STAFF).
+  const backendRoleCodes = useMemo(() => {
+    const mapToBackendRoom = code => {
+      switch (code) {
+        case 'CENTRAL_KITCHEN_STAFF':
+          return 'CHEF';
+        case 'FRANCHISE_STORE_STAFF':
+          return 'STORE_STAFF';
+        default:
+          return code;
+      }
+    };
+
+    return Array.from(new Set(feRoleCodes.map(mapToBackendRoom))).filter(Boolean);
+  }, [feRoleCodes]);
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -68,7 +85,7 @@ export const NotificationProvider = ({ children }) => {
       if (user.id) {
         client.emit('join_user', user.id);
       }
-      roles.forEach(code => {
+      backendRoleCodes.forEach(code => {
         client.emit('join_role', code);
       });
     });
@@ -146,16 +163,17 @@ export const NotificationProvider = ({ children }) => {
 
     switch (refType) {
       case 'ORDER':
-        path = roles.includes('FRANCHISE_STORE_STAFF')
+        path = feRoleCodes.includes('FRANCHISE_STORE_STAFF')
           ? '/app/store/orders'
           : '/app/central/orders';
         break;
       case 'SHIPMENT':
-        path = roles.includes('DRIVER')
+        path = feRoleCodes.includes('DRIVER')
           ? '/app/driver/delivery'
           : '/app/central/shipments';
         break;
       case 'PRODUCTION':
+      case 'PRODUCTION_ORDER':
         path = '/app/central/production';
         break;
       case 'EXCEPTION':

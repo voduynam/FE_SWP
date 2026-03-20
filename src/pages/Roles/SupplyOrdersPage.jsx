@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { useNavigate } from 'react-router-dom';
 
 const PROD_STATUS_LABEL = {
   SUFFICIENT: 'Đủ tồn kho',
@@ -16,13 +17,6 @@ const prodStatusColor = {
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
-
-function getList(res) {
-  if (!res?.success) return [];
-  if (Array.isArray(res.data)) return res.data;
-  if (Array.isArray(res.data?.data)) return res.data.data;
-  return [];
-}
 
 function getItemName(row) {
   if (!row) return '-';
@@ -40,6 +34,7 @@ function getUomLabel(row) {
 const PAGE_SIZE = 20;
 
 export default function SupplyOrdersPage() {
+  const navigate = useNavigate();
   const [deliveryDate, setDeliveryDate] = useState(today());
   const [rows, setRows] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
@@ -51,7 +46,7 @@ export default function SupplyOrdersPage() {
   const [detailData, setDetailData] = useState(null);
   const [detailError, setDetailError] = useState(null);
 
-  const loadData = async (page = 1) => {
+  const loadData = useCallback(async (page = 1) => {
     setLoading(true);
     setMessage('');
     try {
@@ -69,7 +64,7 @@ export default function SupplyOrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [deliveryDate]);
 
   const handleGenerate = async () => {
     const res = await workflowService.generateConsolidatedOrders({ delivery_date: deliveryDate });
@@ -77,7 +72,7 @@ export default function SupplyOrdersPage() {
     await loadData();
   };
 
-  useEffect(() => { loadData(); }, [deliveryDate]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const filteredRows = useMemo(() => {
     const s = (search || '').toLowerCase();
@@ -103,6 +98,34 @@ export default function SupplyOrdersPage() {
   };
 
   const closeDetail = () => setDetailId(null);
+
+  const shipmentOrders = useMemo(() => {
+    if (!(detailData?.stores || []).length) return [];
+    const byId = new Map();
+
+    (detailData.stores || []).forEach(s => {
+      const orderObj = s?.order_id && typeof s.order_id === 'object' ? s.order_id : null;
+      const orderId = orderObj?._id ?? orderObj?.id ?? (typeof s?.order_id === 'string' ? s.order_id : null);
+      if (!orderId) return;
+      if (byId.has(String(orderId))) return;
+
+      byId.set(String(orderId), {
+        _id: String(orderId),
+        order_no: orderObj?.order_no || String(orderId),
+        status: orderObj?.status || '',
+      });
+    });
+
+    return Array.from(byId.values());
+  }, [detailData]);
+
+  const handleCreateShipmentFromOrder = (orderId) => {
+    if (!orderId) return;
+    // Điều hướng sang màn tạo phiếu giao của CentralShipmentsPage để tái sử dụng luồng lot/FIFO.
+    navigate(
+      `/app/central/shipments?create=1&orderId=${encodeURIComponent(orderId)}&shipDate=${encodeURIComponent(`${deliveryDate}T09:00`)}`
+    );
+  };
 
   return (
     <div className='min-h-full space-y-6 animate-fade-in'>
@@ -260,6 +283,35 @@ export default function SupplyOrdersPage() {
                         })}
                       </tbody>
                     </table>
+                  )}
+                </div>
+
+                {/* Shipment creation per internal order */}
+                <div>
+                  <h3 className='mb-2 text-sm font-medium text-slate-700'>Tạo phiếu giao theo từng đơn</h3>
+                  {!shipmentOrders.length && <p className='text-sm text-slate-400'>Không có đơn hợp lệ để tạo phiếu giao.</p>}
+                  {!!shipmentOrders.length && (
+                    <div className='space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3'>
+                      {shipmentOrders.map(o => {
+                        const eligible = ['APPROVED', 'PROCESSING'].includes(o.status);
+                        return (
+                          <div key={o._id} className='flex flex-wrap items-center justify-between gap-2'>
+                            <div className='text-sm'>
+                              <div className='font-medium text-slate-800'>{o.order_no}</div>
+                              <div className='text-xs text-slate-500'>Trạng thái: {o.status || '-'}</div>
+                            </div>
+                            <button
+                              type='button'
+                              disabled={!eligible}
+                              onClick={() => handleCreateShipmentFromOrder(o._id)}
+                              className='rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
+                            >
+                              Tạo phiếu giao
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               </div>

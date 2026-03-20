@@ -1,5 +1,13 @@
-import { useEffect, useMemo, useState, Fragment } from 'react';
-import { RefreshCcw, Search, Package, History, AlertTriangle, ArrowUpDown, ChevronDown } from 'lucide-react';
+import { useEffect, useMemo, useState, Fragment, useCallback } from 'react';
+import {
+  RefreshCcw,
+  Search,
+  Package,
+  History,
+  AlertTriangle,
+  ArrowUpDown,
+  ChevronDown,
+} from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { getQtyAvailable } from '../../utils/inventoryHelpers';
 
@@ -17,18 +25,33 @@ const TXN_TYPES = {
 };
 
 const txnColor = {
-  RECEIPT: 'text-emerald-600', ISSUE: 'text-red-600', TRANSFER_IN: 'text-blue-600',
-  TRANSFER_OUT: 'text-orange-600', ADJUSTMENT: 'text-purple-600', PRODUCTION_IN: 'text-emerald-600',
-  PRODUCTION_OUT: 'text-orange-600', CONSUMPTION: 'text-red-600',
+  RECEIPT: 'text-emerald-600',
+  ISSUE: 'text-red-600',
+  TRANSFER_IN: 'text-blue-600',
+  TRANSFER_OUT: 'text-orange-600',
+  ADJUSTMENT: 'text-purple-600',
+  PRODUCTION_IN: 'text-emerald-600',
+  PRODUCTION_OUT: 'text-orange-600',
+  CONSUMPTION: 'text-red-600',
 };
 
-const severityColor = { EXPIRED: 'bg-red-100 text-red-700', CRITICAL: 'bg-orange-100 text-orange-700', HIGH: 'bg-amber-100 text-amber-700', MEDIUM: 'bg-sky-100 text-sky-700' };
-const severityLabel = { EXPIRED: 'Hết hạn', CRITICAL: '< 3 ngày', HIGH: '3-7 ngày', MEDIUM: '7-14 ngày' };
+const severityColor = {
+  EXPIRED: 'bg-red-100 text-red-700',
+  CRITICAL: 'bg-orange-100 text-orange-700',
+  HIGH: 'bg-amber-100 text-amber-700',
+  MEDIUM: 'bg-sky-100 text-sky-700',
+};
+const severityLabel = {
+  EXPIRED: 'Hết hạn',
+  CRITICAL: '< 3 ngày',
+  HIGH: '3-7 ngày',
+  MEDIUM: '7-14 ngày',
+};
 const EXPIRY_DAYS_THRESHOLD = 14;
 
-const getItemName = v => { if (!v) return '-'; if (typeof v === 'object') return v.name || v.sku || v._id || '-'; return v; };
-const getLocName = v => { if (!v) return '-'; if (typeof v === 'object') return v.name || v.code || v._id || '-'; return v; };
-const getLotCode = v => { if (!v) return '-'; if (typeof v === 'object') return v.lot_code || v._id || '-'; return v; };
+const getItemName = v => (v ? (typeof v === 'object' ? v.name || v.sku || v._id || '-' : v) : '-');
+const getLocName = v => (v ? (typeof v === 'object' ? v.name || v.code || v._id || '-' : v) : '-');
+const getLotCode = v => (v ? (typeof v === 'object' ? v.lot_code || v._id || '-' : v) : '-');
 const getAlertItemName = r => r?.item?.name || r?.item_name || getItemName(r?.item_id) || '-';
 
 const getLotExpiryStatus = lotRow => {
@@ -38,23 +61,15 @@ const getLotExpiryStatus = lotRow => {
   const now = new Date();
   const daysUntilExpiry = Math.ceil((new Date(expDate) - now) / (1000 * 60 * 60 * 24));
 
-  if (daysUntilExpiry < 0) {
-    return { severity: 'EXPIRED', label: severityLabel.EXPIRED, days: daysUntilExpiry };
-  }
-  if (daysUntilExpiry <= 2) {
-    return { severity: 'CRITICAL', label: severityLabel.CRITICAL, days: daysUntilExpiry };
-  }
-  if (daysUntilExpiry <= 5) {
-    return { severity: 'HIGH', label: severityLabel.HIGH, days: daysUntilExpiry };
-  }
-  if (daysUntilExpiry <= EXPIRY_DAYS_THRESHOLD) {
-    return { severity: 'MEDIUM', label: severityLabel.MEDIUM, days: daysUntilExpiry };
-  }
+  if (daysUntilExpiry < 0) return { severity: 'EXPIRED', label: severityLabel.EXPIRED, days: daysUntilExpiry };
+  if (daysUntilExpiry <= 2) return { severity: 'CRITICAL', label: severityLabel.CRITICAL, days: daysUntilExpiry };
+  if (daysUntilExpiry <= 5) return { severity: 'HIGH', label: severityLabel.HIGH, days: daysUntilExpiry };
+  if (daysUntilExpiry <= EXPIRY_DAYS_THRESHOLD) return { severity: 'MEDIUM', label: severityLabel.MEDIUM, days: daysUntilExpiry };
 
   return null;
 };
 
-export default function FranchiseInventoryPage() {
+export default function CentralInventoryPage() {
   const [tab, setTab] = useState('balances');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -66,9 +81,10 @@ export default function FranchiseInventoryPage() {
   const [balSearch, setBalSearch] = useState('');
   const [hideZero, setHideZero] = useState(true);
 
-  // Product type filter (theo item_type)
-  const [itemTypeFilter, setItemTypeFilter] = useState('ALL');
-  const [itemTypes, setItemTypes] = useState([]); // [{ _id, name }]
+  // Location filter (kho)
+  const [locationFilter, setLocationFilter] = useState('ALL');
+  const [filterLocations, setFilterLocations] = useState([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
 
   // Transactions
   const [txns, setTxns] = useState([]);
@@ -80,17 +96,48 @@ export default function FranchiseInventoryPage() {
   const [lowStockAlerts, setLowStockAlerts] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState([]);
 
-  const loadBalances = async (page = 1) => {
-    setLoading(true); setError('');
+  const loadFilterLocations = async () => {
+    setLocationsLoading(true);
     try {
-      // Fetch full rows so we can group by (location,item) without being split by BE pagination.
+      const res = await workflowService.getLocations({ limit: 5000 });
+      if (!res.success) {
+        setFilterLocations([]);
+        return;
+      }
+
+      const list = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.data)
+          ? res.data.data
+          : [];
+      setFilterLocations(list);
+    } finally {
+      setLocationsLoading(false);
+    }
+  };
+
+  const loadBalances = useCallback(async (page = 1, location_id_override) => {
+    setLoading(true);
+    setError('');
+    try {
+      const location_id =
+        location_id_override !== undefined
+          ? location_id_override
+          : locationFilter === 'ALL'
+            ? undefined
+            : locationFilter;
+
+      // Fetch full rows for current location (so FE can group without being split by BE pagination).
       const allRows = [];
       const limit = 200;
       let curPage = 1;
       let totalPages = 1;
 
       while (curPage <= totalPages) {
-        const res = await workflowService.getInventoryBalancesPaginated({ page: curPage, limit });
+        const params = { page: curPage, limit };
+        if (location_id) params.location_id = location_id;
+
+        const res = await workflowService.getInventoryBalancesPaginated(params);
         if (!res.success) {
           setError(res.message || 'Không tải được tồn kho');
           setBalances([]);
@@ -112,11 +159,14 @@ export default function FranchiseInventoryPage() {
       setBalances(allRows);
       setExpandedGroupKeys({});
       setBalPag(prev => ({ ...prev, page }));
-    } finally { setLoading(false); }
-  };
+    } finally {
+      setLoading(false);
+    }
+  }, [locationFilter]);
 
-  const loadTxns = async (page = 1) => {
-    setLoading(true); setError('');
+  const loadTxns = useCallback(async (page = 1) => {
+    setLoading(true);
+    setError('');
     try {
       const params = { page, limit: PAGE_SIZE };
       if (txnTypeFilter) params.txn_type = txnTypeFilter;
@@ -127,8 +177,10 @@ export default function FranchiseInventoryPage() {
         const p = res.data.pagination ?? {};
         setTxnPag({ page: p.page || page, limit: p.limit || PAGE_SIZE, total: p.total || list.length, pages: p.pages || 1 });
       }
-    } finally { setLoading(false); }
-  };
+    } finally {
+      setLoading(false);
+    }
+  }, [txnTypeFilter]);
 
   const loadAlerts = async () => {
     const [lowRes, expRes] = await Promise.all([
@@ -140,13 +192,28 @@ export default function FranchiseInventoryPage() {
       setLowStockAlerts(list);
     }
     if (expRes.success) {
-      const list = Array.isArray(expRes.data) ? expRes.data : Array.isArray(expRes.data?.alerts) ? expRes.data.alerts : [];
+      const list = Array.isArray(expRes.data)
+        ? expRes.data
+        : Array.isArray(expRes.data?.alerts)
+          ? expRes.data.alerts
+          : [];
       setExpiryAlerts(list);
     }
   };
 
-  useEffect(() => { loadBalances(1); loadAlerts(); }, []);
-  useEffect(() => { if (tab === 'transactions') loadTxns(1); }, [tab, txnTypeFilter]);
+  useEffect(() => {
+    loadFilterLocations();
+    loadAlerts();
+  }, []);
+
+  useEffect(() => {
+    // Reload when location changes
+    loadBalances(1, locationFilter === 'ALL' ? undefined : locationFilter);
+  }, [locationFilter, loadBalances]);
+
+  useEffect(() => {
+    if (tab === 'transactions') loadTxns(1);
+  }, [tab, txnTypeFilter, loadTxns]);
 
   const groupedBalances = useMemo(() => {
     const map = new Map();
@@ -163,8 +230,6 @@ export default function FranchiseInventoryPage() {
           key,
           location_id: row.location_id,
           item_id: row.item_id,
-          item_type_id: row.item_id?.item_type?._id ?? row.item_id?.item_type ?? null,
-          item_type_name: row.item_id?.item_type?.name ?? null,
           qty_on_hand: 0,
           qty_reserved: 0,
           qty_available: 0,
@@ -198,42 +263,16 @@ export default function FranchiseInventoryPage() {
     return groups.filter(g => !(hideZero && (g.qty_on_hand ?? 0) === 0));
   }, [balances, hideZero]);
 
-  useEffect(() => {
-    // Build item type dropdown based on what exists in balances.
-    const map = new Map();
-    for (const row of balances) {
-      const t = row.item_id?.item_type;
-      const id = t?._id ?? t ?? null;
-      const name = t?.name ?? null;
-      if (!id || !name) continue;
-      if (!map.has(id)) map.set(id, { _id: id, name });
-    }
-    const list = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-    setItemTypes(list);
-
-    // If no filter selected yet, pick the first type to reduce clutter.
-    if (itemTypeFilter === 'ALL' && list.length > 0) {
-      setItemTypeFilter(list[0]._id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [balances]);
-
   const filteredGroups = useMemo(() => {
-    let list = groupedBalances;
-
-    if (itemTypeFilter !== 'ALL') {
-      list = list.filter(g => String(g.item_type_id ?? '') === String(itemTypeFilter));
-    }
-
     const s = (balSearch || '').toLowerCase().trim();
-    if (!s) return list;
+    if (!s) return groupedBalances;
 
-    return list.filter(g => {
+    return groupedBalances.filter(g => {
       const itemName = getItemName(g.item_id).toLowerCase();
       const loc = getLocName(g.location_id).toLowerCase();
       return itemName.includes(s) || loc.includes(s);
     });
-  }, [groupedBalances, itemTypeFilter, balSearch]);
+  }, [groupedBalances, balSearch]);
 
   const groupPages = Math.max(1, Math.ceil(filteredGroups.length / PAGE_SIZE));
   const currentGroupPage = Math.min(balPag.page, groupPages);
@@ -242,10 +281,18 @@ export default function FranchiseInventoryPage() {
     return filteredGroups.slice(start, start + PAGE_SIZE);
   }, [filteredGroups, currentGroupPage]);
 
+  const showLocationColumn = locationFilter === 'ALL';
+  const balanceTableColSpan = showLocationColumn ? 6 : 5;
+
   const filteredTxns = useMemo(() => {
     const s = (txnSearch || '').toLowerCase();
     if (!s) return txns;
-    return txns.filter(t => getItemName(t.item_id).toLowerCase().includes(s) || getLocName(t.location_id).toLowerCase().includes(s) || (t.notes || '').toLowerCase().includes(s));
+    return txns.filter(
+      t =>
+        getItemName(t.item_id).toLowerCase().includes(s) ||
+        getLocName(t.location_id).toLowerCase().includes(s) ||
+        (t.notes || '').toLowerCase().includes(s),
+    );
   }, [txns, txnSearch]);
 
   const handleRefresh = () => {
@@ -264,45 +311,56 @@ export default function FranchiseInventoryPage() {
     <div className='space-y-4'>
       <div className='flex items-center justify-between'>
         <div>
-          <h1 className='text-2xl font-bold text-slate-900'>Tồn kho cửa hàng</h1>
+          <h1 className='text-2xl font-bold text-slate-900'>Tồn kho bếp trung tâm</h1>
           <p className='text-sm text-slate-500'>Xem tồn kho, lịch sử giao dịch và cảnh báo</p>
         </div>
-        <button onClick={handleRefresh} className='inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50'>
+        <button
+          onClick={handleRefresh}
+          className='inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50'
+        >
           <RefreshCcw className='h-4 w-4' /> Làm mới
         </button>
       </div>
 
       {error && <p className='text-sm text-red-600'>{error}</p>}
 
-      {/* Tabs */}
       <div className='flex gap-1 rounded-lg border border-slate-200 bg-slate-100/50 p-1'>
         {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition ${tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition ${
+              tab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
             <t.icon className='h-4 w-4' /> {t.label}
-            {t.key === 'alerts' && (lowStockAlerts.length + expiryAlerts.length > 0) && (
-              <span className='rounded-full bg-red-100 px-1.5 text-xs font-semibold text-red-600'>{lowStockAlerts.length + expiryAlerts.length}</span>
+            {t.key === 'alerts' && lowStockAlerts.length + expiryAlerts.length > 0 && (
+              <span className='rounded-full bg-red-100 px-1.5 text-xs font-semibold text-red-600'>
+                {lowStockAlerts.length + expiryAlerts.length}
+              </span>
             )}
           </button>
         ))}
       </div>
 
-      {/* Balances */}
       {tab === 'balances' && (
         <div className='space-y-3'>
           <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
-            <div className='min-w-[240px]'>
+            <div className='min-w-[220px]'>
               <select
-                value={itemTypeFilter}
-                onChange={e => setItemTypeFilter(e.target.value)}
+                value={locationFilter}
+                onChange={e => setLocationFilter(e.target.value)}
+                disabled={locationsLoading}
                 className='w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
               >
-                <option value='ALL'>Tất cả loại sản phẩm</option>
-                {itemTypes.map(t => (
-                  <option key={t._id} value={t._id}>
-                    {t.name}
+                <option value='ALL'>Tất cả kho</option>
+                {filterLocations.map(l => (
+                  <option key={l._id} value={l._id}>
+                    {l.name || l.code || l._id}
                   </option>
                 ))}
               </select>
+              {locationsLoading && <p className='mt-0.5 text-[11px] text-slate-400'>Đang tải danh sách kho...</p>}
             </div>
 
             <div className='relative flex-1'>
@@ -326,7 +384,7 @@ export default function FranchiseInventoryPage() {
               <thead className='border-b border-slate-200 bg-slate-50/80 text-left'>
                 <tr>
                   <th className='px-4 py-3 font-medium text-slate-600'>Sản phẩm</th>
-                  <th className='px-4 py-3 font-medium text-slate-600'>Vị trí</th>
+                  {showLocationColumn && <th className='px-4 py-3 font-medium text-slate-600'>Vị trí</th>}
                   <th className='px-4 py-3 font-medium text-slate-600'>Lô</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Tồn kho</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Đặt trước</th>
@@ -336,13 +394,13 @@ export default function FranchiseInventoryPage() {
               <tbody className='divide-y divide-slate-100'>
                 {loading && (
                   <tr>
-                    <td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td>
+                    <td colSpan={balanceTableColSpan} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td>
                   </tr>
                 )}
 
                 {!loading && !pagedGroups.length && (
                   <tr>
-                    <td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Không có dữ liệu</td>
+                    <td colSpan={balanceTableColSpan} className='px-4 py-6 text-center text-slate-400'>Không có dữ liệu</td>
                   </tr>
                 )}
 
@@ -364,8 +422,14 @@ export default function FranchiseInventoryPage() {
                     return (
                       <Fragment key={g.key}>
                         <tr className={`hover:bg-slate-50/50 ${isNegative ? 'bg-red-50/50' : ''}`}>
-                          <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(g.item_id)}</td>
-                          <td className='px-4 py-3 text-slate-700'>{getLocName(g.location_id)}</td>
+                          <td className='px-4 py-3 font-medium text-slate-900'>
+                            {getItemName(g.item_id)}
+                          </td>
+
+                          {showLocationColumn && (
+                            <td className='px-4 py-3 text-slate-700'>{getLocName(g.location_id)}</td>
+                          )}
+
                           <td className='px-4 py-3 text-slate-500 text-xs'>
                             <button
                               type='button'
@@ -381,18 +445,21 @@ export default function FranchiseInventoryPage() {
                               )}
                             </button>
                           </td>
+
                           <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>{qty}</td>
                           <td className='px-4 py-3 text-right text-slate-500'>{reserved}</td>
-                          <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{avail}</td>
+                          <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {avail}
+                          </td>
                         </tr>
 
                         {expanded && (
                           <tr>
-                            <td colSpan={6} className='bg-white'>
+                            <td colSpan={balanceTableColSpan} className='bg-white'>
                               <div className='px-4 py-3'>
                                 <div className='flex items-center justify-between gap-3'>
                                   <div className='text-sm font-medium text-slate-900'>Chi tiết theo lô</div>
-                                  <div className='text-xs text-slate-500'>FIFO theo `mfg_date`</div>
+
                                 </div>
 
                                 <div className='mt-3 overflow-x-auto'>
@@ -415,7 +482,7 @@ export default function FranchiseInventoryPage() {
                                         const exp = l?.lot_id?.exp_date ?? l?.exp_date;
 
                                         const daysText = (() => {
-                                          if (status?.days == null) return null;
+                                          if (status?.days == null || !exp) return null;
                                           if (status.days < 0) return `Đã hết ${Math.abs(status.days)} ngày`;
                                           return `Còn ${status.days} ngày`;
                                         })();
@@ -495,7 +562,6 @@ export default function FranchiseInventoryPage() {
         </div>
       )}
 
-      {/* Transactions */}
       {tab === 'transactions' && (
         <div className='space-y-3'>
           <div className='flex flex-col gap-3 sm:flex-row'>
@@ -503,11 +569,20 @@ export default function FranchiseInventoryPage() {
               <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
               <input value={txnSearch} onChange={e => setTxnSearch(e.target.value)} placeholder='Tìm theo sản phẩm / ghi chú...' className='w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm' />
             </div>
-            <select value={txnTypeFilter} onChange={e => setTxnTypeFilter(e.target.value)} className='rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]'>
+            <select
+              value={txnTypeFilter}
+              onChange={e => setTxnTypeFilter(e.target.value)}
+              className='rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm min-w-[180px]'
+            >
               <option value=''>Tất cả loại GD</option>
-              {Object.entries(TXN_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(TXN_TYPES).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
             </select>
           </div>
+
           <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white'>
             <table className='w-full text-sm'>
               <thead className='border-b border-slate-200 bg-slate-50/80 text-left'>
@@ -523,19 +598,29 @@ export default function FranchiseInventoryPage() {
               <tbody className='divide-y divide-slate-100'>
                 {loading && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
                 {!loading && !filteredTxns.length && <tr><td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Không có giao dịch nào.</td></tr>}
-                {!loading && filteredTxns.map((t, idx) => (
-                  <tr key={t._id || idx} className='hover:bg-slate-50/50'>
-                    <td className='px-4 py-3 text-slate-500 whitespace-nowrap'>{t.txn_time ? new Date(t.txn_time).toLocaleString('vi-VN') : '-'}</td>
-                    <td className='px-4 py-3'><span className={`text-xs font-medium ${txnColor[t.txn_type] || 'text-slate-600'}`}><ArrowUpDown className='mr-1 inline h-3 w-3' />{TXN_TYPES[t.txn_type] || t.txn_type}</span></td>
-                    <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(t.item_id)}</td>
-                    <td className='px-4 py-3 text-slate-500 text-xs'>{getLotCode(t.lot_id)}</td>
-                    <td className={`px-4 py-3 text-right font-semibold ${(t.qty ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{(t.qty ?? 0) >= 0 ? '+' : ''}{t.qty ?? 0}</td>
-                    <td className='px-4 py-3 text-slate-500 max-w-[200px] truncate'>{t.notes || '-'}</td>
-                  </tr>
-                ))}
+                {!loading &&
+                  filteredTxns.map((t, idx) => (
+                    <tr key={t._id || idx} className='hover:bg-slate-50/50'>
+                      <td className='px-4 py-3 text-slate-500 whitespace-nowrap'>{t.txn_time ? new Date(t.txn_time).toLocaleString('vi-VN') : '-'}</td>
+                      <td className='px-4 py-3'>
+                        <span className={`text-xs font-medium ${txnColor[t.txn_type] || 'text-slate-600'}`}>
+                          <ArrowUpDown className='mr-1 inline h-3 w-3' />
+                          {TXN_TYPES[t.txn_type] || t.txn_type}
+                        </span>
+                      </td>
+                      <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(t.item_id)}</td>
+                      <td className='px-4 py-3 text-slate-500 text-xs'>{getLotCode(t.lot_id)}</td>
+                      <td className={`px-4 py-3 text-right font-semibold ${(t.qty ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {(t.qty ?? 0) >= 0 ? '+' : ''}
+                        {t.qty ?? 0}
+                      </td>
+                      <td className='px-4 py-3 text-slate-500 max-w-[200px] truncate'>{t.notes || '-'}</td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
+
           {txnPag.pages > 1 && (
             <div className='flex items-center justify-between text-sm text-slate-500'>
               <span>Trang {txnPag.page}/{txnPag.pages} ({txnPag.total} giao dịch)</span>
@@ -548,10 +633,8 @@ export default function FranchiseInventoryPage() {
         </div>
       )}
 
-      {/* Alerts */}
       {tab === 'alerts' && (
         <div className='grid gap-4 md:grid-cols-2'>
-          {/* Low stock */}
           <div className='rounded-xl border border-slate-200 bg-white'>
             <div className='border-b border-slate-200 px-4 py-3'>
               <h3 className='text-sm font-semibold text-slate-900'>Tồn kho thấp</h3>
@@ -571,7 +654,6 @@ export default function FranchiseInventoryPage() {
             </div>
           </div>
 
-          {/* Expiring */}
           <div className='rounded-xl border border-slate-200 bg-white'>
             <div className='border-b border-slate-200 px-4 py-3'>
               <h3 className='text-sm font-semibold text-slate-900'>Sắp hết hạn</h3>
@@ -599,3 +681,4 @@ export default function FranchiseInventoryPage() {
     </div>
   );
 }
+

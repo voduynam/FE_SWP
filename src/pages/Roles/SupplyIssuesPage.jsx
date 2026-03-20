@@ -3,19 +3,19 @@ import { createPortal } from 'react-dom';
 import { Plus, RefreshCcw, Search, AlertTriangle } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 
+// Enum phải khớp với BE (ExceptionLog.exception_type)
 const EXCEPTION_TYPES = {
-  OUT_OF_STOCK: 'Hết hàng',
-  LATE_DELIVERY: 'Giao trễ',
+  SHORTAGE: 'Hết hàng',
+  DAMAGE: 'Hư hỏng / chất lượng',
   WRONG_ITEM: 'Sai hàng',
-  QUALITY_ISSUE: 'Vấn đề chất lượng',
-  CANCELLED: 'Đã hủy',
+  LATE_DELIVERY: 'Giao trễ',
+  OTHER: 'Khác',
 };
 
 const SEVERITY = {
   LOW: 'Thấp',
   MEDIUM: 'Trung bình',
   HIGH: 'Cao',
-  CRITICAL: 'Nghiêm trọng',
   CRITICAL: 'Nghiêm trọng',
 };
 

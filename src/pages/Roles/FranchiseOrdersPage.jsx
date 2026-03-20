@@ -497,18 +497,37 @@ export default function FranchiseOrdersPage() {
     setReceiveOpen(true);
     setReceiveLoading(true);
     try {
-      // Tìm shipment đã giao cho đơn này
-      const shipRes = await workflowService.getShipments({
-        order_id: order._id,
-        status: 'SHIPPED',
-        limit: 1,
-      });
-      const raw = shipRes.data;
-      const rows = Array.isArray(raw) ? raw : (raw?.data ?? raw);
-      const list = Array.isArray(rows) ? rows : [];
-      const shipment = list[0];
-      if (!shipRes.success || !shipment) {
-        setReceiveError('Không tìm thấy chuyến giao cho đơn này (trạng thái SHIPPED).');
+      // Tìm shipment đã giao cho đơn này.
+      // FE trước đây chỉ tìm SHIPPED, nhưng driver có thể đã cập nhật shipment = DELIVERED
+      // trước khi store tạo GoodsReceipt.
+      const tryStatuses = ['SHIPPED', 'DELIVERED'];
+      let shipment = null;
+      let lastErr = null;
+
+      for (const st of tryStatuses) {
+        const shipRes = await workflowService.getShipments({
+          order_id: order._id,
+          status: st,
+          limit: 1,
+        });
+        if (!shipRes.success) {
+          lastErr = shipRes.message || 'Không tải được shipment';
+          continue;
+        }
+
+        const raw = shipRes.data;
+        const rows = Array.isArray(raw) ? raw : raw?.data ?? raw;
+        const list = Array.isArray(rows) ? rows : [];
+        shipment = list[0] || null;
+        if (shipment) break;
+      }
+
+      if (!shipment) {
+        setReceiveError(
+          lastErr
+            ? `Không tìm thấy chuyến giao cho đơn này. ${lastErr}`
+            : 'Không tìm thấy chuyến giao cho đơn này (trạng thái SHIPPED/DELIVERED).'
+        );
         setReceiveLoading(false);
         return;
       }

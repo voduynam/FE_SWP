@@ -370,8 +370,32 @@ export const workflowService = {
     withResult(() => axiosInstance.delete(`/master-data/org-units/${id}`)),
   getLocations: params =>
     withResult(() => axiosInstance.get('/master-data/locations', { params })),
-  seedStoreLocations: () =>
-    withResult(() => axiosInstance.post('/master-data/seed-store-locations')),
+  // NOTE: endpoint `/master-data/seed-store-locations` does not exist in BE.
+  // Keep this method to avoid breaking FE flows; we just load active locations.
+  seedStoreLocations: async () => {
+    try {
+      const res = await axiosInstance.get('/master-data/locations', {
+        params: { status: 'ACTIVE', limit: 1000 },
+      });
+      const payload = res?.data ?? {};
+      const locations = payload?.data ?? payload;
+      return {
+        success: true,
+        data: { locations },
+        message: payload?.message || '',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        data: { locations: [] },
+        message:
+          error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          'Không tải được locations',
+        error,
+      };
+    }
+  },
   getLocation: id =>
     withResult(() => axiosInstance.get(`/master-data/locations/${id}`)),
   createLocation: payload =>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, RefreshCcw, Search, Truck, MapPin } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { useSearchParams } from 'react-router-dom';
 
 const ROUTE_STATUS = {
   PLANNED: 'Đã lên kế hoạch',
@@ -85,6 +86,7 @@ function getShipmentsFromStops(stops) {
 }
 
 export default function SupplyDeliveryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [routes, setRoutes] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [loading, setLoading] = useState(false);
@@ -112,6 +114,24 @@ export default function SupplyDeliveryPage() {
   const [shipments, setShipments] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [locations, setLocations] = useState([]);
+
+  const shipmentIdFromQuery = searchParams.get('shipmentId');
+
+  const closeCreateModal = (opts = { clearQuery: true }) => {
+    setCreateOpen(false);
+    setCreating(false);
+    setCreateError('');
+    setSelectedShipmentId('');
+    setSelectedStoreLocationId('');
+
+    if (opts?.clearQuery) {
+      setSearchParams(prev => {
+        const next = new URLSearchParams(prev);
+        next.delete('shipmentId');
+        return next;
+      }, { replace: true });
+    }
+  };
 
   const loadRoutes = async (page = 1) => {
     setLoading(true);
@@ -165,22 +185,6 @@ export default function SupplyDeliveryPage() {
   };
 
   /* ─── Route actions ─── */
-  const handleStartRoute = async () => {
-    if (!detailRoute) return;
-    setActionLoading(true);
-    try {
-      const res = await workflowService.startDeliveryRoute(detailRoute._id, {});
-      if (res.success) {
-        setSuccess('Tuyến giao đã bắt đầu.');
-        await loadDetail(detailRoute._id);
-      } else {
-        alert(res.message || 'Bắt đầu tuyến thất bại');
-      }
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   const handleCompleteRoute = async () => {
     if (!detailRoute) return;
     setActionLoading(true);
@@ -250,7 +254,7 @@ export default function SupplyDeliveryPage() {
       driver_id: '',
       planned_date: new Date().toISOString().slice(0, 10),
     });
-    setSelectedShipmentId('');
+    setSelectedShipmentId(shipmentIdFromQuery || '');
     setSelectedStoreLocationId('');
     const load = async () => {
       const [shRes, driversRes, locRes, seedRes] = await Promise.all([
@@ -284,7 +288,23 @@ export default function SupplyDeliveryPage() {
     load();
   }, [createOpen]);
 
-  const pickedShipments = useMemo(() => shipments.filter(s => s.status === 'PICKED'), [shipments]);
+  // If opened from central shipments, keep shipmentId preselected.
+  useEffect(() => {
+    if (!shipmentIdFromQuery) return;
+    if (!createOpen) {
+      setCreateOpen(true);
+    } else {
+      setSelectedShipmentId(shipmentIdFromQuery);
+    }
+  }, [shipmentIdFromQuery, createOpen]);
+
+  // Supply lập tuyến giao cho các phiếu đã sẵn sàng vận chuyển.
+  // Trước đây FE chỉ cho chọn status = PICKED → khi Supply Coordinator đã "dispatch" thì shipment chuyển sang SHIPPED
+  // nên dropdown rỗng (đúng case bạn báo).
+  const eligibleShipments = useMemo(
+    () => shipments.filter(s => ['PICKED', 'SHIPPED', 'IN_TRANSIT'].includes(s.status)),
+    [shipments]
+  );
   const selectedShipment = useMemo(() => shipments.find(s => s._id === selectedShipmentId), [shipments, selectedShipmentId]);
 
   /* Tự điền kho nhận khi chọn phiếu giao */
@@ -310,11 +330,12 @@ export default function SupplyDeliveryPage() {
       const toLocationId = sel?.to_location_id?._id ?? sel?.to_location_id;
       const locOrg = sel?.to_location_id?.org_unit_id;
       const orderStore = sel?.order_id?.store_org_unit_id;
+      const normalizeOrgUnitId = (org) => (org && typeof org === 'object' ? org._id : org);
       const storeOrgId = selectedStoreLocationId
-        ? (locations.find(l => String(l._id) === String(selectedStoreLocationId))?.org_unit_id ?? null)
+        ? normalizeOrgUnitId(locations.find(l => String(l._id) === String(selectedStoreLocationId))?.org_unit_id)
         : (locOrg != null ? (typeof locOrg === 'object' ? locOrg._id : locOrg) : null)
           || (orderStore != null ? (typeof orderStore === 'object' ? orderStore._id : orderStore) : null)
-          || (toLocationId && locations.find(l => String(l._id) === String(toLocationId))?.org_unit_id) ?? null;
+          || (toLocationId ? normalizeOrgUnitId(locations.find(l => String(l._id) === String(toLocationId))?.org_unit_id) : null) ?? null;
       if (!storeOrgId) { setCreateError('Vui lòng chọn kho nhận (điểm dừng).'); setCreating(false); return; }
 
       const routeRes = await workflowService.createDeliveryRoute({
@@ -614,11 +635,11 @@ export default function SupplyDeliveryPage() {
 
       {/* ─── Create Modal ─── */}
       {createOpen && createPortal(
-        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && setCreateOpen(false)}>
+        <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 p-4' onClick={() => !creating && closeCreateModal()}>
           <div className='w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl' onClick={e => e.stopPropagation()}>
             <div className='mb-4 flex items-center justify-between'>
               <h2 className='text-lg font-semibold text-slate-900'>Tạo tuyến giao hàng</h2>
-              <button onClick={() => !creating && setCreateOpen(false)} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
+              <button onClick={() => !creating && closeCreateModal()} className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'>×</button>
             </div>
             {createError && <p className='mb-3 text-sm text-red-600'>{createError}</p>}
 
@@ -645,10 +666,10 @@ export default function SupplyDeliveryPage() {
                   <label className='block text-sm font-medium text-slate-700'>Phiếu giao hàng *</label>
                   <select value={selectedShipmentId} onChange={e => setSelectedShipmentId(e.target.value)} className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' required>
                     <option value=''>-- Chọn phiếu giao --</option>
-                    {pickedShipments.map(sh => (
+                    {eligibleShipments.map(sh => (
                       <option key={sh._id} value={sh._id}>{sh.shipment_no || sh._id}</option>
                     ))}
-                    {!pickedShipments.length && <option value='' disabled>Không có phiếu đã có hàng</option>}
+                    {!eligibleShipments.length && <option value='' disabled>Không có phiếu phù hợp (PICKED/SHIPPED/IN_TRANSIT)</option>}
                   </select>
                 </div>
               </div>
@@ -691,7 +712,7 @@ export default function SupplyDeliveryPage() {
               </div>
 
               <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
-                <button type='button' disabled={creating} onClick={() => setCreateOpen(false)} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
+                <button type='button' disabled={creating} onClick={() => closeCreateModal()} className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'>Hủy</button>
                 <button type='submit' disabled={creating || !selectedShipmentId || !selectedStoreLocationId} className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'>
                   {creating ? 'Đang tạo...' : 'Tạo tuyến giao'}
                 </button>

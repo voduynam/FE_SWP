@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Truck, MapPin, RefreshCcw, CheckCircle, ArrowRight, History } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
@@ -70,6 +70,8 @@ export default function DriverShipmentsPage() {
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
   const [deliveredShipments, setDeliveredShipments] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPag, setHistoryPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 1 });
 
   useEffect(() => {
     if (!deliveryPhotoFile) {
@@ -115,9 +117,13 @@ export default function DriverShipmentsPage() {
       });
       const toFetch = plannedShipmentIds.slice(0, 10);
       const plannedRes = await Promise.all(toFetch.map((id) => workflowService.getShipment(id)));
-      const planned = plannedRes
+      const plannedRaw = plannedRes
         .filter((r) => r?.success && r?.data)
         .map((r) => r.data);
+      // Chỉ hiển thị lô đã được CK/Supply dispatch (SHIPPED/IN_TRANSIT) – không cho tài xế chạy lô còn PICKED/DRAFT
+      const planned = plannedRaw.filter(
+        (s) => s.status === 'SHIPPED' || s.status === 'IN_TRANSIT'
+      );
 
       const combined = [...planned, ...shipped, ...transit]
         .filter((s) => s.status !== 'DELIVERED')
@@ -131,21 +137,41 @@ export default function DriverShipmentsPage() {
     }
   };
 
-  const loadDeliveredShipments = async () => {
+  const loadDeliveredShipments = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const res = await workflowService.getShipmentsPaginated({ status: 'DELIVERED', limit: PAGE_SIZE });
+      const res = await workflowService.getShipmentsPaginated({
+        status: 'DELIVERED',
+        page: historyPage,
+        limit: PAGE_SIZE,
+      });
       const list = getList(res);
-      setDeliveredShipments(list.sort((a, b) => new Date(b.delivery_photo_uploaded_at || b.updatedAt || 0) - new Date(a.delivery_photo_uploaded_at || a.updatedAt || 0)));
+      const p = res?.data?.pagination ?? {};
+      setHistoryPag({
+        page: p.page || historyPage,
+        limit: p.limit || PAGE_SIZE,
+        total: p.total || list.length,
+        pages: p.pages || 1,
+      });
+      setDeliveredShipments(
+        list.sort(
+          (a, b) =>
+            new Date(b.delivery_photo_uploaded_at || b.updatedAt || 0) -
+            new Date(a.delivery_photo_uploaded_at || a.updatedAt || 0),
+        ),
+      );
     } catch {
       setDeliveredShipments([]);
+      setHistoryPag({ page: 1, limit: PAGE_SIZE, total: 0, pages: 1 });
     } finally {
       setHistoryLoading(false);
     }
-  };
+  }, [historyPage]);
 
   useEffect(() => { loadShipments(); }, []);
-  useEffect(() => { if (activeTab === 'history') loadDeliveredShipments(); }, [activeTab]);
+  useEffect(() => {
+    if (activeTab === 'history') loadDeliveredShipments();
+  }, [activeTab, historyPage, loadDeliveredShipments]);
 
   useEffect(() => {
     if (success) {
@@ -262,7 +288,10 @@ export default function DriverShipmentsPage() {
               Đang giao
             </button>
             <button
-              onClick={() => setActiveTab('history')}
+              onClick={() => {
+                setActiveTab('history');
+                setHistoryPage(1);
+              }}
               className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${activeTab === 'history' ? 'bg-slate-200 text-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
             >
               <History className='h-4 w-4' /> Lịch sử đã giao
@@ -285,33 +314,87 @@ export default function DriverShipmentsPage() {
             </div>
           )}
           {!historyLoading && deliveredShipments.length > 0 && (
-            <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-              {deliveredShipments.map(sh => (
-                <div key={sh._id} className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm'>
-                  <div className='mb-2 flex items-start justify-between'>
-                    <p className='font-semibold text-slate-900'>{sh.shipment_no || sh._id}</p>
-                    <span className='inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700'>Đã giao</span>
-                  </div>
-                  <p className='text-xs text-slate-500'>
-                    Ngày giao: {sh.delivery_photo_uploaded_at ? new Date(sh.delivery_photo_uploaded_at).toLocaleString('vi-VN') : (sh.updatedAt ? new Date(sh.updatedAt).toLocaleString('vi-VN') : '-')}
-                  </p>
-                  {resolvePhotoUrl(sh.delivery_photo_url) ? (
-                    <div className='mt-3'>
-                      <div className='h-24 w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-100'>
-                        <img
-                          src={resolvePhotoUrl(sh.delivery_photo_url)}
-                          alt='Ảnh giao hàng'
-                          className='h-full w-full object-cover'
-                          onError={e => { e.target.style.display = 'none'; }}
-                        />
-                      </div>
-                      <a href={resolvePhotoUrl(sh.delivery_photo_url)} target='_blank' rel='noopener noreferrer' className='mt-1 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-800'>Xem ảnh</a>
-                    </div>
-                  ) : (
-                    <p className='mt-2 text-xs text-slate-400'>Không có ảnh</p>
-                  )}
-                </div>
-              ))}
+            <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white'>
+              <table className='w-full text-sm'>
+                <thead className='border-b border-slate-200 bg-slate-50/80 text-left'>
+                  <tr>
+                    <th className='px-4 py-3 font-medium text-slate-600'>Lô giao</th>
+                  <th className='px-4 py-3 font-medium text-slate-600'>Đơn hàng</th>
+                    <th className='px-4 py-3 font-medium text-slate-600'>Giao đến</th>
+                    <th className='px-4 py-3 font-medium text-slate-600'>Ngày giao</th>
+                    <th className='px-4 py-3 font-medium text-slate-600'>Trạng thái</th>
+                    <th className='px-4 py-3 font-medium text-slate-600 text-right'>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className='divide-y divide-slate-100'>
+                  {deliveredShipments.map(sh => (
+                    <tr key={sh._id} className='hover:bg-slate-50/50'>
+                      <td className='px-4 py-3 font-medium text-slate-900'>
+                        {sh.shipment_no || sh._id}
+                      </td>
+                    <td className='px-4 py-3 text-slate-700'>
+                      {sh.order_id?.order_no || sh.order_id?.orderNo || sh.order_id || '-'}
+                    </td>
+                    <td className='px-4 py-3 text-slate-700'>
+                      {getLocationLabel(sh.to_location_id)}
+                    </td>
+                      <td className='px-4 py-3 text-slate-500'>
+                        {sh.delivery_photo_uploaded_at
+                          ? new Date(sh.delivery_photo_uploaded_at).toLocaleString('vi-VN')
+                          : sh.updatedAt
+                            ? new Date(sh.updatedAt).toLocaleString('vi-VN')
+                            : '-'}
+                      </td>
+                      <td className='px-4 py-3'>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                            statusColor.DELIVERED || 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {SHIPMENT_STATUS.DELIVERED}
+                        </span>
+                      </td>
+                      <td className='px-4 py-3 text-right'>
+                        <button
+                          type='button'
+                          onClick={() => loadDetail(sh._id)}
+                          className='rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50'
+                        >
+                          Chi tiết
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === 'history' && historyPag.pages > 1 && (
+            <div className='flex items-center justify-between text-sm text-slate-500'>
+              <span>
+                Trang {historyPag.page}/{historyPag.pages} ({historyPag.total} lô)
+              </span>
+              <div className='flex gap-1'>
+                <button
+                  type='button'
+                  disabled={historyPag.page <= 1 || historyLoading}
+                  onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                  className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'
+                >
+                  Trước
+                </button>
+                <button
+                  type='button'
+                  disabled={historyPag.page >= historyPag.pages || historyLoading}
+                  onClick={() =>
+                    setHistoryPage(p => Math.min(historyPag.pages, p + 1))
+                  }
+                  className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'
+                >
+                  Sau
+                </button>
+              </div>
             </div>
           )}
         </>
@@ -358,7 +441,7 @@ export default function DriverShipmentsPage() {
                 >
                   Chi tiết
                 </button>
-                {(sh.status === 'PICKED' || sh.status === 'SHIPPED') && (
+                {sh.status === 'SHIPPED' && (
                   <button
                     disabled={actionLoadingId === sh._id}
                     onClick={() => updateStatus(sh, 'IN_TRANSIT')}
@@ -449,7 +532,7 @@ export default function DriverShipmentsPage() {
                 <div className='border-t border-slate-200 pt-4'>
                   <h3 className='mb-3 text-sm font-semibold text-slate-700'>Cập nhật trạng thái giao hàng</h3>
                   <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-                  {(detailShipment.status === 'PICKED' || detailShipment.status === 'SHIPPED') && (
+                  {detailShipment.status === 'SHIPPED' && (
                     <button
                       disabled={actionLoadingId === detailShipment._id}
                       onClick={() => updateStatus(detailShipment, 'IN_TRANSIT')}

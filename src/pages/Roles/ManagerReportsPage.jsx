@@ -55,9 +55,7 @@ export default function ManagerReportsPage() {
       <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Báo cáo & hiệu suất vận hành</h1>
-          <p className='text-sm text-slate-500'>
-            Dashboard Analytics + Performance Metrics (dữ liệu 30 ngày gần nhất nếu không truyền tham số).
-          </p>
+
         </div>
         <button
           onClick={loadData}
@@ -101,9 +99,6 @@ export default function ManagerReportsPage() {
         <div className='flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between'>
           <div>
             <h2 className='text-base font-semibold text-slate-900'>Lợi nhuận & chi phí</h2>
-            <p className='text-xs text-slate-500'>
-              Map đúng BE: `summary`, `trend`, `top_profit_items`.
-            </p>
           </div>
           <div className='text-xs text-slate-400'>
             {profit?.period?.start_date && profit?.period?.end_date
@@ -236,7 +231,6 @@ export default function ManagerReportsPage() {
         <div className='mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between'>
           <div>
             <h2 className='text-base font-semibold text-slate-900'>Hiệu suất vận hành</h2>
-            <p className='text-xs text-slate-500'>Dữ liệu từ `GET /api/performance-metrics/dashboard`.</p>
           </div>
           <div className='text-xs text-slate-400'>
             {deliveryPerf?.metric_date && `Gần nhất: ${new Date(deliveryPerf.metric_date).toLocaleDateString('vi-VN')}`}

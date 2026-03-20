@@ -90,14 +90,20 @@ export default function GoodsReceiptPage() {
 
   const [shipmentLoadInfo, setShipmentLoadInfo] = useState(null); // { shipped, inTransit, afterFilter }
   const loadShipmentsForCreate = async () => {
-    const [shippedRes, inTransitRes, receiptsRes] = await Promise.all([
+    // Chỉ cho phép tạo phiếu nhận cho các lô đã được CK/Supply dispatch (SHIPPED) – đúng theo Flow 4
+    const [shippedRes, inTransitRes, deliveredRes, receiptsRes] = await Promise.all([
       workflowService.getShipments({ status: 'SHIPPED', limit: 100 }),
       workflowService.getShipments({ status: 'IN_TRANSIT', limit: 100 }),
+      workflowService.getShipments({ status: 'DELIVERED', limit: 100 }),
       workflowService.getGoodsReceipts({ limit: 500 }),
     ]);
+
     const shippedList = getShipmentList(shippedRes);
     const inTransitList = getShipmentList(inTransitRes);
-    let list = [...shippedList, ...inTransitList];
+    const deliveredList = getShipmentList(deliveredRes);
+
+    // Merge + dedupe by shipment _id
+    let list = [...shippedList, ...inTransitList, ...deliveredList];
     const existingShipmentIds = new Set(
       (getReceiptList(receiptsRes) || [])
         .map(r => r.shipment_id?._id ?? r.shipment_id)

@@ -34,6 +34,22 @@ export default function AlertsBadge() {
   const locationId = user?.default_location_id || null;
   const { summary } = useAlertSummary(locationId);
 
+  const roleCodes = Array.isArray(user?.roles)
+    ? user.roles.map(r => String(r.code || '').trim().toUpperCase())
+    : [];
+
+  // Alerts are shown by each inventory page (expiry + low-stock),
+  // so badge should navigate to the appropriate inventory screen.
+  const targetPath = (() => {
+    if (roleCodes.includes('FRANCHISE_STORE_STAFF')) return '/app/store/inventory';
+    if (roleCodes.includes('CENTRAL_KITCHEN_STAFF')) return '/app/central/inventory';
+    // Supply Coordinator / Manager / Admin: use system inventory view
+    if (roleCodes.includes('SUPPLY_COORDINATOR') || roleCodes.includes('MANAGER') || roleCodes.includes('ADMIN')) {
+      return '/app/manager/inventory';
+    }
+    return '/app/manager/inventory';
+  })();
+
   const total = summary?.total_alerts || 0;
   const severity = getSeverityFromSummary(summary);
   const classes = severityClasses[severity] || severityClasses.NONE;
@@ -41,7 +57,7 @@ export default function AlertsBadge() {
   return (
     <button
       type="button"
-      onClick={() => navigate('/app/alerts')}
+      onClick={() => navigate(targetPath)}
       className={`relative inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-all shadow-sm ${classes}`}
     >
       <AlertTriangle className="h-4 w-4" />
