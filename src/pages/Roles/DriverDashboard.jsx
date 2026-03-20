@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { Truck, MapPin, Clock, CheckCircle, Package, X, AlertCircle } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Truck, MapPin, Clock, CheckCircle, Package, X, AlertCircle, RefreshCcw, Phone } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { ChartContainer, ChartTooltipContent } from '../../components/ui/chart';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDelivery } from '../../contexts/DeliveryContext';
 import StatCard from '../../components/ui/StatCard';
@@ -7,21 +9,52 @@ import StatusBadge from '../../components/ui/StatusBadge';
 
 export default function DriverDashboard() {
   const { user } = useAuth();
-  const { deliveries, loading, updateDeliveryStatus, reportIssue } = useDelivery();
+  const { deliveries, loading, error, updateDeliveryStatus, reportIssue, refresh } = useDelivery();
   const userName = user?.name || user?.username || 'Tài xế';
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [selectedDelivery, setSelectedDelivery] = useState(null);
   const [issueDescription, setIssueDescription] = useState('');
+  const [issueSubmitting, setIssueSubmitting] = useState(false);
+  const [listFilter, setListFilter] = useState('all'); // all | pending | shipping | delivered
 
-  const pendingCount = deliveries.filter(d => d.status === 'pending').length;
-  const shippingCount = deliveries.filter(d => d.status === 'shipping').length;
-  const deliveredCount = deliveries.filter(d => d.status === 'delivered').length;
+  const pendingCount = useMemo(() => deliveries.filter(d => d.status === 'pending').length, [deliveries]);
+  const shippingCount = useMemo(() => deliveries.filter(d => d.status === 'shipping').length, [deliveries]);
+  const deliveredCount = useMemo(() => deliveries.filter(d => d.status === 'delivered').length, [deliveries]);
   const todayTotal = deliveries.length;
+
+  const filteredDeliveries = useMemo(() => {
+    if (listFilter === 'all') return deliveries;
+    return deliveries.filter(d => d.status === listFilter);
+  }, [deliveries, listFilter]);
+
+  const statusSeries = useMemo(
+    () => [
+      { label: 'Chờ giao', count: pendingCount },
+      { label: 'Đang giao', count: shippingCount },
+      { label: 'Đã giao', count: deliveredCount },
+    ],
+    [pendingCount, shippingCount, deliveredCount]
+  );
+
+  const getFilterPillClassName = (key) => {
+    if (listFilter !== key) {
+      return 'bg-slate-100 hover:bg-slate-200 text-slate-700';
+    }
+    switch (key) {
+      case 'pending':
+        return 'bg-slate-900 text-white shadow-sm ring-1 ring-amber-500/30';
+      case 'shipping':
+        return 'bg-slate-900 text-white shadow-sm ring-1 ring-sky-500/30';
+      case 'delivered':
+        return 'bg-slate-900 text-white shadow-sm ring-1 ring-emerald-500/30';
+      default:
+        return 'bg-slate-900 text-white shadow-sm ring-1 ring-slate-500/20';
+    }
+  };
 
   const handleStartDelivery = async (deliveryId) => {
     try {
       await updateDeliveryStatus(deliveryId, 'shipping');
-      console.log('Bắt đầu giao:', deliveryId);
     } catch (error) {
       alert(error.message || 'Cập nhật thất bại');
     }
@@ -30,7 +63,6 @@ export default function DriverDashboard() {
   const handleCompleteDelivery = async (deliveryId) => {
     try {
       await updateDeliveryStatus(deliveryId, 'delivered');
-      console.log('Hoàn thành giao:', deliveryId);
     } catch (error) {
       alert(error.message || 'Cập nhật thất bại');
     }
@@ -48,6 +80,7 @@ export default function DriverDashboard() {
     }
 
     try {
+      setIssueSubmitting(true);
       await reportIssue(selectedDelivery, issueDescription);
       alert('Đã gửi báo cáo sự cố thành công');
       setShowIssueModal(false);
@@ -55,6 +88,8 @@ export default function DriverDashboard() {
       setIssueDescription('');
     } catch (error) {
       alert(error.message || 'Gửi báo cáo thất bại');
+    } finally {
+      setIssueSubmitting(false);
     }
   };
 
@@ -62,6 +97,7 @@ export default function DriverDashboard() {
     setShowIssueModal(false);
     setSelectedDelivery(null);
     setIssueDescription('');
+    setIssueSubmitting(false);
   };
 
   if (loading) {
@@ -75,12 +111,22 @@ export default function DriverDashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Xin chào, {userName}</h1>
-        <p className="text-muted-foreground mt-1">
-          Quản lý đơn hàng được phân công giao trong ngày
-        </p>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Xin chào, {userName}</h1>
+          <p className="text-muted-foreground mt-1">Theo dõi & xử lý các đơn giao trong ngày của bạn.</p>
+        </div>
+        <button
+          type="button"
+          onClick={refresh}
+          className="btn-outline flex items-center gap-2"
+          title="Làm mới dữ liệu"
+        >
+          <RefreshCcw className="h-4 w-4" /> Làm mới
+        </button>
       </div>
+
+      {error && <p className="text-sm text-destructive">{String(error?.message || error || 'Có lỗi xảy ra')}</p>}
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -110,15 +156,71 @@ export default function DriverDashboard() {
         />
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-2 bg-gradient-to-br from-orange-500/10 via-transparent to-transparent ring-1 ring-orange-500/10">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold">Trạng thái đơn</h2>
+            <span className="text-xs text-muted-foreground">{todayTotal} đơn</span>
+          </div>
+
+          <ChartContainer config={{ count: { label: 'Số lượng' } }} className="h-[260px] w-full">
+            <BarChart data={statusSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
+              <Tooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={(value) => [Number(value ?? 0).toLocaleString('vi-VN'), 'Số lượng']}
+                  />
+                }
+              />
+              <Bar dataKey="count" fill="#f97316" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ChartContainer>
+        </div>
+
+        <div className="rounded-xl border bg-card p-4 shadow-sm bg-gradient-to-br from-slate-900/5 via-transparent to-transparent ring-1 ring-slate-900/5">
+          <h2 className="text-base font-semibold mb-3">Lọc danh sách</h2>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: 'all', label: 'Tất cả' },
+              { key: 'pending', label: 'Chờ giao' },
+              { key: 'shipping', label: 'Đang giao' },
+              { key: 'delivered', label: 'Đã giao' },
+            ].map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setListFilter(t.key)}
+                className={`px-3 py-1 rounded-full text-sm transition ${getFilterPillClassName(t.key)}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 text-xs text-muted-foreground">
+            Hiển thị {filteredDeliveries.length} / {todayTotal} đơn
+          </div>
+        </div>
+      </div>
+
       {/* Deliveries List */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Danh sách đơn hàng</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {deliveries.map((delivery) => (
+          {filteredDeliveries.map((delivery) => (
             <div 
               key={delivery.id} 
-              className={`bg-card rounded-xl border p-5 transition-all hover:shadow-lg ${
-                delivery.status === 'shipping' ? 'border-accent' : 'border-border'
+              className={`bg-card rounded-xl border p-5 transition-all hover:shadow-lg border-l-4 ${
+                delivery.status === 'pending'
+                  ? 'border-l-amber-500/70'
+                  : delivery.status === 'shipping'
+                    ? 'border-l-sky-500/70'
+                    : delivery.status === 'delivered'
+                      ? 'border-l-emerald-500/70'
+                      : 'border-l-slate-400/50'
               }`}
             >
               <div className="flex items-start justify-between mb-4">
@@ -146,6 +248,12 @@ export default function DriverDashboard() {
                   <Package className="w-4 h-4 text-muted-foreground" />
                   <span>{delivery.items} sản phẩm</span>
                 </div>
+                {delivery.phone ? (
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">{delivery.phone}</span>
+                  </div>
+                ) : null}
               </div>
 
               {/* Actions */}
@@ -188,7 +296,7 @@ export default function DriverDashboard() {
           ))}
         </div>
 
-        {deliveries.length === 0 && (
+        {todayTotal === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Truck className="w-16 h-16 mx-auto mb-4 opacity-50" />
             <p>Không có đơn hàng nào được phân công hôm nay</p>
@@ -237,14 +345,16 @@ export default function DriverDashboard() {
                 <button
                   onClick={handleCancelIssue}
                   className="flex-1 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+                  disabled={issueSubmitting}
                 >
                   Hủy
                 </button>
                 <button
                   onClick={handleSubmitIssue}
                   className="flex-1 py-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+                  disabled={issueSubmitting}
                 >
-                  Gửi báo cáo
+                  {issueSubmitting ? 'Đang gửi...' : 'Gửi báo cáo'}
                 </button>
               </div>
             </div>

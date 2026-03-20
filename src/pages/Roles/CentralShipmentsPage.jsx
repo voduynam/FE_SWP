@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { resolvePhotoUrl } from '../../utils/photoHelpers';
+import { useAuth } from '../../contexts/AuthContext';
 
 const SHIPMENT_STATUS = {
   DRAFT: 'Nháp',
@@ -57,7 +58,15 @@ const SEED_STORE_LOCATION = {
 const VALID_STATUSES = ['ALL', 'DRAFT', 'PICKED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'];
 
 export default function CentralShipmentsPage() {
+  const { user } = useAuth();
+  const roleCodes = Array.isArray(user?.roles)
+    ? user.roles.map(r => String(r.code || '').toUpperCase())
+    : [];
+  const isSupplyCoordinator = roleCodes.includes('SUPPLY_COORDINATOR');
+  const canManageShipments = isSupplyCoordinator;
+
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const statusFromUrl = searchParams.get('status');
   const [shipments, setShipments] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
@@ -142,21 +151,27 @@ export default function CentralShipmentsPage() {
 
   useEffect(() => { loadShipments(1); }, [statusFilter]);
 
-  /* ─── Mở modal tạo phiếu với đơn đã chọn khi vào trang bằng link từ duyệt đơn ─── */
+  /* ─── Mở modal tạo phiếu với đơn đã chọn khi vào trang bằng link từ duyệt đơn (chỉ Supply Coordinator) ─── */
   useEffect(() => {
     const create = searchParams.get('create');
     const orderId = searchParams.get('orderId');
-    if (create === '1' && orderId) {
+    const shipDateParam = searchParams.get('shipDate');
+    if (canManageShipments && create === '1' && orderId) {
       setCreateOpen(true);
       setSelectedOrderId(orderId);
+      if (shipDateParam) {
+        const nextShipDate = String(shipDateParam).length >= 16 ? String(shipDateParam).slice(0, 16) : String(shipDateParam);
+        setShipDate(nextShipDate);
+      }
       setSearchParams(prev => {
         const next = new URLSearchParams(prev);
         next.delete('create');
         next.delete('orderId');
+        next.delete('shipDate');
         return next;
       }, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [canManageShipments, searchParams, setSearchParams]);
 
   /* ─── Detail ─── */
   const loadDetail = async id => {
@@ -238,15 +253,33 @@ export default function CentralShipmentsPage() {
         const seedRes = await workflowService.seedStoreLocations();
         const seedLocs = Array.isArray(seedRes?.data?.locations) ? seedRes.data.locations : [];
         // Chỉ gọi getLocations KHÔNG truyền org_unit_id → BE trả về tất cả kho (bếp + cửa hàng). status=ACTIVE đồng bộ với API.
-        const [approvedRes, processingRes, orgKitchenRes, orgStoreRes, allLocsRes, shipmentsRes] = await Promise.all([
+        const [approvedRes, processingRes, orgKitchenRes, orgStoreRes, allLocsRes, shipmentsRes, prodDoneRes] = await Promise.all([
           workflowService.getInternalOrders({ status: 'APPROVED', limit: 100 }),
           workflowService.getInternalOrders({ status: 'PROCESSING', limit: 100 }),
           workflowService.getOrgUnits({ type: 'KITCHEN', limit: 100 }),
           workflowService.getOrgUnits({ type: 'STORE', limit: 100 }),
           workflowService.getLocations({ status: 'ACTIVE', limit: 1000 }),
           workflowService.getShipmentsPaginated({ limit: 200 }),
+          workflowService.getProductionOrders({ status: 'DONE', limit: 500 }),
         ]);
         const combinedOrders = [...getList(approvedRes), ...getList(processingRes)];
+
+        // Chỉ cho phép tạo phiếu giao đối với các đơn đã hoàn thành sản xuất (production DONE)
+        let orderIdsWithProdDone = new Set();
+        try {
+          const prodList = Array.isArray(prodDoneRes?.data)
+            ? prodDoneRes.data
+            : Array.isArray(prodDoneRes?.data?.data)
+              ? prodDoneRes.data.data
+              : [];
+          prodList.forEach(po => {
+            const id = po?.internal_order_id ?? po?.order_id;
+            if (id) orderIdsWithProdDone.add(String(id));
+          });
+        } catch {
+          orderIdsWithProdDone = new Set();
+        }
+
         let orderIdsWithShipment = new Set();
         try {
           const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
@@ -256,7 +289,37 @@ export default function CentralShipmentsPage() {
           // Bỏ qua nếu parse shipments lỗi
         }
         const ordersWithoutShipment = combinedOrders.filter(o => !orderIdsWithShipment.has(String(o._id)));
-        setOrders(ordersWithoutShipment);
+
+        // Filter thêm: chỉ giữ đơn đã có production DONE (nằm trong orderIdsWithProdDone)
+        const finalOrders = ordersWithoutShipment.filter(o =>
+          orderIdsWithProdDone.size === 0 ? true : orderIdsWithProdDone.has(String(o._id))
+        );
+
+        // Nếu mở modal tạo phiếu giao từ link kèm `orderId`, đảm bảo option của orderId đó xuất hiện dù BE limit/filters
+        // có thể khiến nó không nằm trong `finalOrders`.
+        let finalOrdersToSet = finalOrders;
+        const orderIdStr = selectedOrderId ? String(selectedOrderId) : '';
+        if (orderIdStr && !finalOrdersToSet.some(o => String(o._id) === orderIdStr)) {
+          try {
+            const extraRes = await workflowService.getInternalOrder(orderIdStr);
+            if (extraRes?.success && extraRes?.data) {
+              const d = extraRes.data;
+              finalOrdersToSet = [
+                ...finalOrdersToSet,
+                {
+                  _id: d._id,
+                  order_no: d.order_no,
+                  store_org_unit_id: d.store_org_unit_id,
+                  status: d.status,
+                },
+              ];
+            }
+          } catch (_) {
+            // ignore
+          }
+        }
+
+        setOrders(finalOrdersToSet);
         const kitchenOrgs = getList(orgKitchenRes);
         const fromLocs = [];
         for (const org of kitchenOrgs) {
@@ -596,14 +659,22 @@ export default function CentralShipmentsPage() {
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Giao hàng</h1>
           <p className='mt-1 text-sm text-slate-500'>
-            Tạo phiếu giao hàng từ đơn hàng đã duyệt (chọn đơn, kho xuất/nhận, lot); khi chưa có phiếu cho đơn thì dùng nút bên dưới.
+            Supply Coordinator tạo phiếu giao hàng từ các đơn đã hoàn thành sản xuất (chọn đơn, kho xuất/nhận, lot) và điều phối giao hàng.
           </p>
         </div>
         <div className='flex gap-2'>
-          <button onClick={() => setCreateOpen(true)} className='inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'>
-            <Plus className='h-4 w-4' /> Tạo phiếu giao hàng
-          </button>
-          <button onClick={() => loadShipments(1)} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
+          {canManageShipments && (
+            <button
+              onClick={() => setCreateOpen(true)}
+              className='inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'
+            >
+              <Plus className='h-4 w-4' /> Tạo phiếu giao hàng
+            </button>
+          )}
+          <button
+            onClick={() => loadShipments(1)}
+            className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'
+          >
             <RefreshCcw className='h-4 w-4' /> Làm mới
           </button>
         </div>
@@ -652,19 +723,24 @@ export default function CentralShipmentsPage() {
                 </td>
                 <td className='px-4 py-3 text-right'>
                   <div className='flex items-center justify-end gap-1'>
-                    <button onClick={() => loadDetail(sh._id)} className='rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'>
+                    <button
+                      onClick={() => loadDetail(sh._id)}
+                      className='rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50'
+                    >
                       Chi tiết
                     </button>
-                    {sh.status === 'DRAFT' && doneProductionOrderIds.has(String(sh.order_id?._id ?? sh.order_id)) && (
-                      <button
-                        disabled={actionLoadingId === sh._id}
-                        onClick={() => updateStatus(sh, 'PICKED')}
-                        className='rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60'
-                        title='Đơn đã sản xuất xong; đánh dấu đã lấy hàng'
-                      >
-                        {actionLoadingId === sh._id ? 'Đang xử lý...' : 'Chuyển sang Đã lấy hàng'}
-                      </button>
-                    )}
+                    {canManageShipments &&
+                      sh.status === 'DRAFT' &&
+                      doneProductionOrderIds.has(String(sh.order_id?._id ?? sh.order_id)) && (
+                        <button
+                          disabled={actionLoadingId === sh._id}
+                          onClick={() => updateStatus(sh, 'PICKED')}
+                          className='rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-60'
+                          title='Đơn đã sản xuất xong; đánh dấu đã lấy hàng'
+                        >
+                          {actionLoadingId === sh._id ? 'Đang xử lý...' : 'Chuyển sang Đã lấy hàng'}
+                        </button>
+                      )}
                   </div>
                 </td>
               </tr>
@@ -768,20 +844,10 @@ export default function CentralShipmentsPage() {
                   );
                 })()}
 
-                {/* Flow guide */}
-                <div className='rounded-lg border border-slate-200 bg-white p-3'>
-                  <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Quy trình giao hàng</h3>
-                  <ol className='space-y-1 text-sm'>
-                    <li className={detailShipment.status ? 'text-slate-700' : 'text-slate-400'}>1. Tạo lô giao hàng (DRAFT) — Chọn đơn hàng, lot, kho xuất/nhận</li>
-                    <li className={['SHIPPED', 'IN_TRANSIT', 'DELIVERED'].includes(detailShipment.status) ? 'text-slate-700' : 'text-slate-400'}>2. Xuất kho (SHIPPED) — Trừ tồn kho bếp trung tâm, đơn hàng → SHIPPED</li>
-                    <li className={['IN_TRANSIT', 'DELIVERED'].includes(detailShipment.status) ? 'text-slate-700' : 'text-slate-400'}>3. Đang vận chuyển (IN_TRANSIT) — Hàng trên đường</li>
-                    <li className={detailShipment.status === 'DELIVERED' ? 'text-slate-700' : 'text-slate-400'}>4. Đã giao đến (DELIVERED) — Hàng đến cửa hàng</li>
-                  </ol>
-                </div>
 
                 {/* Action buttons */}
                 <div className='flex flex-wrap gap-2'>
-                  {detailShipment.status === 'DRAFT' && (
+                  {canManageShipments && detailShipment.status === 'DRAFT' && (
                     <>
                       <button
                         disabled={actionLoadingId === detailShipment._id}
@@ -801,6 +867,15 @@ export default function CentralShipmentsPage() {
                   )}
                   {['SHIPPED', 'IN_TRANSIT'].includes(detailShipment.status) && (
                     <p className='text-xs text-slate-500'>Đang vận chuyển và Đã giao đến do Driver cập nhật.</p>
+                  )}
+                  {canManageShipments && ['SHIPPED', 'IN_TRANSIT'].includes(detailShipment.status) && (
+                    <button
+                      type='button'
+                      onClick={() => navigate(`/app/supply/delivery?shipmentId=${encodeURIComponent(detailShipment._id)}`)}
+                      className='rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'
+                    >
+                      Tạo tuyến giao
+                    </button>
                   )}
                 </div>
 

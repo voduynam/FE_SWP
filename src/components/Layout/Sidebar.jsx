@@ -16,7 +16,6 @@ import {
   X,
   ChevronDown,
   RotateCcw,
-  AlertTriangle,
 } from "lucide-react";
 
 // Phân quyền menu theo yêu cầu:
@@ -143,11 +142,6 @@ const menuByRole = {
     //   path: "/app/admin/reports",
     // },
     {
-      title: "Cảnh báo",
-      icon: AlertTriangle,
-      path: "/app/alerts",
-    },
-    {
       title: "Cài đặt hệ thống",
       icon: Settings,
       path: "/app/admin/settings",
@@ -196,11 +190,6 @@ const menuByRole = {
       icon: BarChart3,
       path: "/app/manager/reports",
     },
-    {
-      title: "Cảnh báo",
-      icon: AlertTriangle,
-      path: "/app/alerts",
-    },
   ],
 
   // Central Kitchen Staff – sản xuất & kho bếp trung tâm
@@ -237,9 +226,9 @@ const menuByRole = {
       path: "/app/central/materials",
     },
     {
-      title: "Cảnh báo",
-      icon: AlertTriangle,
-      path: "/app/alerts",
+      title: "Tồn kho bếp trung tâm",
+      icon: Warehouse,
+      path: "/app/central/inventory",
     },
   ],
 
@@ -249,6 +238,21 @@ const menuByRole = {
       title: "Dashboard",
       icon: LayoutDashboard,
       path: "/app/supply/dashboard",
+    },
+    {
+      title: "Phiếu giao hàng",
+      icon: TruckIcon,
+      path: "/app/central/shipments",
+    },
+    {
+      title: "Tổng hợp đơn (Supply)",
+      icon: ClipboardList,
+      path: "/app/supply/orders",
+    },
+    {
+      title: "Đơn hàng nội bộ",
+      icon: ClipboardList,
+      path: "/app/central/orders",
     },
     {
       title: "Điều phối & giao hàng",
@@ -264,11 +268,6 @@ const menuByRole = {
       title: "Xử lý sự cố",
       icon: Settings,
       path: "/app/supply/issues",
-    },
-    {
-      title: "Cảnh báo",
-      icon: AlertTriangle,
-      path: "/app/alerts",
     },
   ],
 
@@ -298,11 +297,6 @@ const menuByRole = {
       title: "Tồn kho cửa hàng",
       icon: Warehouse,
       path: "/app/store/inventory",
-    },
-    {
-      title: "Cảnh báo",
-      icon: AlertTriangle,
-      path: "/app/alerts",
     },
   ],
 

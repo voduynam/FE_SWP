@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 import { lazy, Suspense } from 'react';
 import {
   BrowserRouter as Router,
@@ -20,7 +19,6 @@ import CkManagerLayout from './components/Layout/CkManagerLayout';
 import Login from './pages/Auth/Login';
 import NotFound from './pages/NotFound/NotFound';
 import RoleDashboard from './pages/Roles/RoleDashboard';
-import AlertsDashboardPage from './pages/Roles/AlertsDashboardPage';
 const AdminUsersPage = lazy(() => import('./pages/Roles/AdminUsersPage'));
 const AdminStoresPage = lazy(() => import('./pages/Roles/AdminStoresPage'));
 const AdminSettingsPage = lazy(() => import('./pages/Roles/AdminSettingsPage'));
@@ -37,6 +35,7 @@ const CentralOrdersPage = lazy(() => import('./pages/Roles/CentralOrdersPage'));
 const CentralProductionPage = lazy(() => import('./pages/Roles/CentralProductionPage'));
 const CentralShipmentsPage = lazy(() => import('./pages/Roles/CentralShipmentsPage'));
 const CentralMaterialsPage = lazy(() => import('./pages/Roles/CentralMaterialsPage'));
+const CentralInventoryPage = lazy(() => import('./pages/Roles/CentralInventoryPage'));
 const SupplyOrdersPage = lazy(() => import('./pages/Roles/SupplyOrdersPage'));
 const SupplyDeliveryPage = lazy(() => import('./pages/Roles/SupplyDeliveryPage'));
 const SupplyIssuesPage = lazy(() => import('./pages/Roles/SupplyIssuesPage'));
@@ -111,6 +110,7 @@ function AppContent() {
           <Route path='production' element={<CentralProductionPage />} />
           <Route path='shipments' element={<CentralShipmentsPage />} />
           <Route path='materials' element={<CentralMaterialsPage />} />
+          <Route path='inventory' element={<CentralInventoryPage />} />
         </Route>
 
         {/* Supply Coordinator routes */}
@@ -138,8 +138,6 @@ function AppContent() {
           <Route path='delivery' element={<Delivery />} />
         </Route>
 
-        {/* Alerts dashboard – all roles */}
-        <Route path='alerts' element={<AlertsDashboardPage />} />
       </Route>
 
       <Route path='/login' element={<Login />} />
