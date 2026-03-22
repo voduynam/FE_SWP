@@ -1097,7 +1097,7 @@ export default function CentralProductionPage() {
               {newOrder.lines.length > 0 && (
               <div className='space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3'>
                 <div className='flex items-center justify-between'>
-                  <span className='text-sm font-medium text-slate-700'>Dòng sản xuất — lines[] (item_id, recipe_id, planned_qty, uom_id)</span>
+                  <span className='text-sm font-medium text-slate-700'>Dòng sản xuất </span>
                   <button type='button' onClick={addLine} className='text-xs font-medium text-orange-600 hover:text-orange-700'>+ Thêm dòng</button>
                 </div>
                 {newOrder.lines.map((line, idx) => (

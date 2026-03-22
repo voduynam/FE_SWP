@@ -5,11 +5,37 @@ import { workflowService } from '../../services/workflowService';
 const roleLabels = {
   ADMIN: { label: 'Quản trị viên', color: 'bg-rose-50 text-rose-600' },
   MANAGER: { label: 'Quản lý', color: 'bg-sky-50 text-sky-600' },
-  CENTRAL_KITCHEN_STAFF: { label: 'NV Bếp TT', color: 'bg-teal-50 text-teal-600' },
+  /* Bếp TT — teal (khác hẳn tông cửa hàng) */
+  CENTRAL_KITCHEN_STAFF: {
+    label: 'NV Bếp TT',
+    color: 'bg-teal-50 text-teal-800 ring-1 ring-teal-300/70',
+  },
+  CHEF: {
+    label: 'Nhân viên bếp trung tâm',
+    color: 'bg-teal-50 text-teal-800 ring-1 ring-teal-300/70',
+  },
   SUPPLY_COORDINATOR: { label: 'Điều phối viên', color: 'bg-amber-50 text-amber-600' },
-  FRANCHISE_STORE_STAFF: { label: 'NV Cửa hàng', color: 'bg-emerald-50 text-emerald-600' },
+  /* Cửa hàng — violet (khác hẳn tông bếp) */
+  FRANCHISE_STORE_STAFF: {
+    label: 'NV Cửa hàng',
+    color: 'bg-violet-50 text-violet-800 ring-1 ring-violet-300/70',
+  },
+  STORE_STAFF: {
+    label: 'Nhân viên cửa hàng',
+    color: 'bg-violet-50 text-violet-800 ring-1 ring-violet-300/70',
+  },
   DRIVER: { label: 'Tài xế', color: 'bg-indigo-50 text-indigo-600' },
 };
+
+/** Hiển thị tên vai trò tiếng Việt khi đã map trong roleLabels */
+const getRoleDisplayLabel = role => {
+  const code = role?.code;
+  if (!code) return role?.name || '';
+  return roleLabels[code]?.label || role?.name || code;
+};
+
+/** BE trả role có `id` hoặc `_id` — dùng thống nhất khi so khớp */
+const getRoleId = r => (r ? r._id || r.id : null);
 
 const getRows = data => {
   if (Array.isArray(data)) return data;
@@ -50,6 +76,9 @@ export default function AdminUsersPage() {
     phone: '',
     status: 'ACTIVE',
   });
+  /** Snapshot user khi mở form sửa — để diff vai trò (POST/DELETE /users/:id/roles) */
+  const [editSourceUser, setEditSourceUser] = useState(null);
+  const [editRolesSelection, setEditRolesSelection] = useState({});
   const [showRolesModal, setShowRolesModal] = useState(false);
   const [rolesUser, setRolesUser] = useState(null);
   const [rolesSelection, setRolesSelection] = useState({});
@@ -157,6 +186,7 @@ export default function AdminUsersPage() {
   };
   const openEditUser = user => {
     setEditError('');
+    setEditSourceUser(user);
     setEditForm({
       _id: user._id,
       org_unit_id: user.org_unit_id?._id || user.org_unit_id || '',
@@ -165,6 +195,17 @@ export default function AdminUsersPage() {
       phone: user.phone || '',
       status: (user.status || 'ACTIVE').toUpperCase(),
     });
+    const currentIds = new Set(
+      (user.roles || [])
+        .map(getRoleId)
+        .filter(Boolean)
+        .map(id => String(id)),
+    );
+    const nextSel = {};
+    roles.forEach(r => {
+      nextSel[r._id] = currentIds.has(String(r._id));
+    });
+    setEditRolesSelection(nextSel);
     setShowEdit(true);
   };
 
@@ -180,10 +221,10 @@ export default function AdminUsersPage() {
   };
 
   const openRolesModal = user => {
-    const currentRoleIds = (user.roles || []).map(r => r._id);
+    const currentRoleIds = (user.roles || []).map(r => getRoleId(r)).filter(Boolean);
     const initialSelection = {};
     roles.forEach(r => {
-      initialSelection[r._id] = currentRoleIds.includes(r._id);
+      initialSelection[r._id] = currentRoleIds.some(id => String(id) === String(r._id));
     });
     setRolesSelection(initialSelection);
     setRolesUser(user);
@@ -241,7 +282,7 @@ export default function AdminUsersPage() {
       <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
         <div>
           <h1 className='text-3xl font-bold text-slate-900'>Quản lý Người dùng</h1>
-          <p className='mt-1 text-sm text-slate-500'>Danh sách lấy trực tiếp từ DB qua API `/users`.</p>
+          <p className='mt-1 text-sm text-slate-500'>Quản lí danh sách người dùng, tài xế và các vai trò.</p>
         </div>
         <div className='flex items-center gap-3'>
           <button onClick={loadUsers} className='btn-outline inline-flex items-center gap-2' disabled={loading}>
@@ -445,7 +486,7 @@ export default function AdminUsersPage() {
                     <option value=''>Chọn vai trò</option>
                     {roles.map(r => (
                       <option key={r._id} value={r._id}>
-                        {r.name} ({r.code})
+                        {getRoleDisplayLabel(r)} ({r.code})
                       </option>
                     ))}
                   </select>
@@ -476,17 +517,27 @@ export default function AdminUsersPage() {
       {showEdit && (
         <div
           className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
-          onClick={() => !editing && setShowEdit(false)}
+          onClick={() => {
+            if (!editing) {
+              setShowEdit(false);
+              setEditSourceUser(null);
+            }
+          }}
         >
           <div
-            className='bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto'
+            className='bg-white rounded-2xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto'
             onClick={e => e.stopPropagation()}
           >
             <div className='flex items-center justify-between mb-5'>
               <h2 className='text-xl font-semibold text-slate-900'>Cập nhật người dùng</h2>
               <button
                 type='button'
-                onClick={() => !editing && setShowEdit(false)}
+                onClick={() => {
+                  if (!editing) {
+                    setShowEdit(false);
+                    setEditSourceUser(null);
+                  }
+                }}
                 className='text-slate-400 hover:text-slate-600 text-xl leading-none px-2'
               >
                 ×
@@ -513,10 +564,43 @@ export default function AdminUsersPage() {
                   setEditing(false);
                   return;
                 }
+
+                const initialIds = (editSourceUser?.roles || [])
+                  .map(getRoleId)
+                  .filter(Boolean)
+                  .map(id => String(id));
+                const selectedIds = Object.entries(editRolesSelection)
+                  .filter(([, on]) => on)
+                  .map(([id]) => String(id));
+                const toAdd = selectedIds.filter(id => !initialIds.includes(id));
+                const toRemove = initialIds.filter(id => !selectedIds.includes(id));
+
+                let roleErr = '';
+                if (toAdd.length) {
+                  const res = await workflowService.assignUserRoles(editForm._id, toAdd);
+                  if (!res.success) {
+                    roleErr = res.message || 'Không thể gán vai trò mới';
+                  }
+                }
+                if (!roleErr && toRemove.length) {
+                  const res = await workflowService.removeUserRoles(editForm._id, toRemove);
+                  if (!res.success) {
+                    roleErr = res.message || 'Không thể gỡ vai trò';
+                  }
+                }
+
                 await loadUsers();
                 setEditing(false);
                 setShowEdit(false);
-                setSuccessMessage('Cập nhật người dùng thành công.');
+                setEditSourceUser(null);
+                if (roleErr) {
+                  setError(roleErr);
+                  setSuccessMessage(
+                    'Đã cập nhật thông tin tài khoản. Cập nhật vai trò chưa hoàn tất — xem thông báo lỗi.',
+                  );
+                } else {
+                  setSuccessMessage('Cập nhật người dùng và vai trò thành công.');
+                }
               }}
               className='space-y-5'
             >
@@ -607,10 +691,54 @@ export default function AdminUsersPage() {
                 </select>
               </div>
 
+              <div>
+                <label className='block text-sm font-medium text-slate-700'>Vai trò</label>
+                <p className='mt-0.5 text-xs text-slate-500'>
+                  Chọn một hoặc nhiều vai trò. Khi lưu, hệ thống cập nhật thông tin tài khoản trước,
+                  sau đó gán các vai trò mới và gỡ các vai trò bạn bỏ chọn.
+                </p>
+                <div className='mt-2 max-h-52 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2'>
+                  {roles.map(r => (
+                    <label
+                      key={r._id}
+                      className='flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-slate-50'
+                    >
+                      <span>
+                        <span className='font-medium text-slate-800'>
+                          {getRoleDisplayLabel(r)}
+                        </span>
+                        <span className='ml-1 text-slate-500'>({r.code})</span>
+                      </span>
+                      <input
+                        type='checkbox'
+                        checked={!!editRolesSelection[r._id]}
+                        onChange={e =>
+                          setEditRolesSelection(prev => ({
+                            ...prev,
+                            [r._id]: e.target.checked,
+                          }))
+                        }
+                        className='h-4 w-4 rounded border-slate-300 text-orange-500 focus:ring-orange-400'
+                      />
+                    </label>
+                  ))}
+                  {!roles.length && (
+                    <p className='px-2 py-2 text-xs text-slate-500'>
+                      Chưa tải danh sách vai trò — thử làm mới trang.
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
                 <button
                   type='button'
-                  onClick={() => !editing && setShowEdit(false)}
+                  onClick={() => {
+                    if (!editing) {
+                      setShowEdit(false);
+                      setEditSourceUser(null);
+                    }
+                  }}
                   className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors'
                 >
                   Hủy
@@ -655,7 +783,10 @@ export default function AdminUsersPage() {
                 <label key={r._id} className='flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm'>
                   <div>
                     <p className='font-medium text-slate-900'>
-                      {r.name} ({r.code})
+                      {getRoleDisplayLabel(r)}
+                      <span className='ml-1 font-normal text-slate-500'>
+                        ({r.code})
+                      </span>
                     </p>
                     <p className='text-xs text-slate-400'>{r._id}</p>
                   </div>

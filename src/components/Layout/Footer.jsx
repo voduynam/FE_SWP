@@ -8,6 +8,7 @@ import {
   Phone,
   MapPin,
 } from 'lucide-react';
+import BrandLogo from '../BrandLogo';
 
 const Footer = () => {
   const currentYear = new Date().getFullYear();
@@ -48,12 +49,10 @@ const Footer = () => {
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8'>
           {/* Company Info */}
           <div className='space-y-4'>
-            <div className='flex items-center space-x-2'>
-              <div className='bg-blue-600 text-white px-3 py-1 rounded-lg font-bold text-xl'>
-                SWP391
-              </div>
+            <div className='flex items-center gap-2 sm:gap-3'>
+              <BrandLogo variant='dark' className='h-11 w-11 rounded-lg' />
               <span className='text-white font-semibold text-lg'>
-                Learning Platform
+                CK Manager
               </span>
             </div>
             <p className='text-sm text-gray-400 leading-relaxed'>
@@ -67,7 +66,7 @@ const Footer = () => {
                   href={social.href}
                   target='_blank'
                   rel='noopener noreferrer'
-                  className='w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-blue-600 transition-colors'
+                  className='w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center hover:bg-ck-accent transition-colors'
                   aria-label={social.label}
                 >
                   <social.icon className='w-5 h-5' />
@@ -166,7 +165,7 @@ const Footer = () => {
         <div className='border-t border-gray-800 mt-8 pt-8'>
           <div className='flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0'>
             <p className='text-sm text-gray-400 text-center md:text-left'>
-              © {currentYear} SWP391 Learning Platform. All rights reserved.
+              © {currentYear} CK Manager. All rights reserved.
             </p>
             <div className='flex items-center space-x-6 text-sm'>
               <Link

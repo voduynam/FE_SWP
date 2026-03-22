@@ -27,7 +27,7 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
     return (
       <div className='flex items-center justify-center min-h-screen'>
         <div className='text-center'>
-          <div className='mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600'></div>
+          <div className='mx-auto h-8 w-8 animate-spin rounded-full border-2 border-ck-accent/20 border-t-ck-accent'></div>
           <p className='mt-2 text-gray-600'>Đang tải...</p>
         </div>
       </div>
@@ -64,7 +64,7 @@ const RoleProtectedRoute = ({ children, allowedRoles = [] }) => {
             </p>
             <button
               onClick={() => window.history.back()}
-              className='rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700'
+              className='rounded-[10px] bg-ck-accent px-4 py-2 text-white shadow-md hover:bg-ck-accent-hover'
             >
               Quay lại
             </button>

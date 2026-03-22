@@ -139,7 +139,12 @@ export default function SupplyCoordinatorDashboard() {
   }, [deliveryDate]);
 
   const openExceptions = useMemo(
-    () => exceptions.filter(e => ['OPEN', 'INVESTIGATING'].includes(String(e.status || '').toUpperCase())),
+    () =>
+      exceptions.filter(e =>
+        ['OPEN', 'IN_PROGRESS', 'INVESTIGATING'].includes(
+          String(e.status || '').toUpperCase(),
+        ),
+      ),
     [exceptions]
   );
 

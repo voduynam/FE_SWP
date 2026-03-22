@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import { Plus, RefreshCcw, Search, AlertTriangle } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 
-// Enum phải khớp với BE (ExceptionLog.exception_type)
+// Enum khớp BE: models/ExceptionLog.js — exception_type
 const EXCEPTION_TYPES = {
-  SHORTAGE: 'Hết hàng',
-  DAMAGE: 'Hư hỏng / chất lượng',
-  WRONG_ITEM: 'Sai hàng',
+  OUT_OF_STOCK: 'Hết hàng',
   LATE_DELIVERY: 'Giao trễ',
-  OTHER: 'Khác',
+  WRONG_ITEM: 'Sai hàng',
+  QUALITY_ISSUE: 'Chất lượng',
+  CANCELLED: 'Đã hủy',
 };
 
 const SEVERITY = {
@@ -19,8 +19,10 @@ const SEVERITY = {
   CRITICAL: 'Nghiêm trọng',
 };
 
+// Khớp BE: OPEN | IN_PROGRESS | RESOLVED | CLOSED (có thể còn bản ghi cũ INVESTIGATING)
 const EXC_STATUS = {
   OPEN: 'Mở',
+  IN_PROGRESS: 'Đang xử lý',
   INVESTIGATING: 'Đang điều tra',
   RESOLVED: 'Đã giải quyết',
   CLOSED: 'Đóng',
@@ -35,6 +37,7 @@ const severityColor = {
 
 const statusColor = {
   OPEN: 'bg-blue-100 text-blue-700',
+  IN_PROGRESS: 'bg-amber-100 text-amber-700',
   INVESTIGATING: 'bg-amber-100 text-amber-700',
   RESOLVED: 'bg-emerald-100 text-emerald-700',
   CLOSED: 'bg-slate-100 text-slate-600',
@@ -379,7 +382,9 @@ export default function SupplyIssuesPage() {
                 )}
 
                 {/* Resolve action */}
-                {detailExc.status === 'OPEN' || detailExc.status === 'INVESTIGATING' ? (
+                {['OPEN', 'IN_PROGRESS', 'INVESTIGATING'].includes(
+                  String(detailExc.status || '').toUpperCase(),
+                ) ? (
                   <div className='space-y-2 rounded-lg border border-slate-200 p-3'>
                     <h3 className='text-xs font-semibold uppercase tracking-wide text-slate-500'>Giải quyết sự cố</h3>
                     <textarea

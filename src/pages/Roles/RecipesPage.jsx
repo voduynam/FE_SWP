@@ -294,7 +294,7 @@ export default function RecipesPage() {
       <div className='flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Công thức sản xuất</h1>
-          <p className='mt-1 text-sm text-slate-500'>Quản lý công thức (recipe): tạo, sửa, thêm/xóa nguyên liệu. Chỉ công thức ACTIVE dùng cho lệnh sản xuất.</p>
+          <p className='mt-1 text-sm text-slate-500'>Quản lý công thức : tạo, sửa, thêm/xóa nguyên liệu. </p>
         </div>
         <div className='flex gap-2'>
           <button onClick={() => setCreateOpen(true)} className='inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'>

@@ -17,6 +17,7 @@ import {
   ChevronDown,
   RotateCcw,
 } from "lucide-react";
+import BrandLogo from "../BrandLogo";
 
 // Phân quyền menu theo yêu cầu:
 // - Franchise Staff: Đặt hàng, theo dõi đơn, xác nhận nhận hàng, xem tồn kho cửa hàng
@@ -161,7 +162,7 @@ const menuByRole = {
       path: "/app/central/orders",
     },
     {
-      title: "Sản phẩm & công thức",
+      title: "Sản phẩm",
       icon: Package,
       path: "/app/manager/products",
     },
@@ -245,7 +246,7 @@ const menuByRole = {
       path: "/app/central/shipments",
     },
     {
-      title: "Tổng hợp đơn (Supply)",
+      title: "Tổng hợp đơn",
       icon: ClipboardList,
       path: "/app/supply/orders",
     },
@@ -351,7 +352,7 @@ export default function Sidebar({
       {/* Mobile menu button */}
       <button
         onClick={() => setIsMobileOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-orange-500 text-white shadow-lg"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-ck-accent text-white shadow-lg"
       >
         <Menu className="w-5 h-5" />
       </button>
@@ -359,7 +360,7 @@ export default function Sidebar({
       {/* Mobile overlay */}
       {isMobileOpen && (
         <div
-          className="lg:hidden fixed inset-0 bg-slate-900/60 z-40"
+          className="lg:hidden fixed inset-0 bg-ck-midnight/65 z-40"
           onClick={() => setIsMobileOpen(false)}
         />
       )}
@@ -370,20 +371,21 @@ export default function Sidebar({
           fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50
           ${isCollapsed ? "w-20" : "w-72"}
           ${isMobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-          bg-slate-900 text-slate-100
+          ck-sidebar-bg text-slate-100
           flex flex-col h-screen lg:h-screen
           transition-all duration-300 ease-in-out
           shadow-xl lg:shadow-none
         `}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-800">
+        <div className="flex items-center justify-between p-4 border-b border-white/10">
           <div
             className={`flex items-center gap-3 ${isCollapsed ? "justify-center w-full" : ""}`}
           >
-            <div className="w-10 h-10 rounded-xl gradient-secondary flex items-center justify-center shadow-lg">
-              <ChefHat className="w-6 h-6 text-white" />
-            </div>
+            <BrandLogo
+              variant="dark"
+              className="h-10 w-10 rounded-xl shadow-lg"
+            />
             {!isCollapsed && (
               <div className="animate-fade-in">
                 <h1 className="font-bold text-lg">CK Manager</h1>
@@ -394,14 +396,14 @@ export default function Sidebar({
 
           <button
             onClick={() => setIsMobileOpen(false)}
-            className="lg:hidden p-1 rounded hover:bg-slate-800"
+            className="lg:hidden p-1 rounded hover:bg-white/10"
           >
             <X className="w-5 h-5" />
           </button>
 
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="hidden lg:flex p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+            className="hidden lg:flex p-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
             <ChevronDown
               className={`w-4 h-4 transition-transform ${isCollapsed ? "-rotate-90" : "rotate-90"}`}
@@ -422,15 +424,15 @@ export default function Sidebar({
                     transition-all duration-200
                     ${
                       isActive(item.path)
-                        ? "bg-slate-800 text-white font-medium border-l-4 border-orange-400"
-                        : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
+                        ? "bg-white/10 text-white font-medium border-l-[3px] border-ck-gold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                        : "text-slate-300 hover:bg-white/5 hover:text-white"
                     }
                     ${isCollapsed ? "justify-center px-2" : ""}
                   `}
                   title={isCollapsed ? item.title : undefined}
                 >
                   <item.icon
-                    className={`w-5 h-5 flex-shrink-0 ${isActive(item.path) ? "text-orange-400" : "text-slate-300"}`}
+                    className={`w-5 h-5 flex-shrink-0 ${isActive(item.path) ? "text-ck-gold-light" : "text-slate-300"}`}
                   />
                   {!isCollapsed && (
                     <span className="animate-fade-in">{item.title}</span>
@@ -442,12 +444,12 @@ export default function Sidebar({
         </nav>
 
         {/* User info */}
-        <div className="p-4 border-t border-slate-800">
+        <div className="p-4 border-t border-white/10">
           <div
             className={`flex items-center gap-3 ${isCollapsed ? "justify-center" : ""}`}
           >
-            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0">
-              <span className="text-sm font-semibold text-orange-400">
+            <div className="w-10 h-10 rounded-full bg-white/10 ring-1 ring-white/15 flex items-center justify-center flex-shrink-0">
+              <span className="text-sm font-semibold text-ck-gold-light">
                 {userName?.charAt(0)?.toUpperCase() || "U"}
               </span>
             </div>
@@ -464,7 +466,7 @@ export default function Sidebar({
             {!isCollapsed && (
               <button
                 onClick={onLogout}
-                className="p-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300 hover:text-destructive"
+                className="p-2 rounded-lg hover:bg-white/10 transition-colors text-slate-300 hover:text-red-400"
                 title="Đăng xuất"
               >
                 <LogOut className="w-4 h-4" />
@@ -474,7 +476,7 @@ export default function Sidebar({
           {isCollapsed && (
             <button
               onClick={onLogout}
-              className="mt-2 w-full p-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-300 hover:text-destructive flex justify-center"
+              className="mt-2 w-full p-2 rounded-lg hover:bg-white/10 transition-colors text-slate-300 hover:text-red-400 flex justify-center"
               title="Đăng xuất"
             >
               <LogOut className="w-4 h-4" />

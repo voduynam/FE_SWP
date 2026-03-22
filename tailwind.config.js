@@ -21,6 +21,7 @@ export default {
                 sans: ['Inter', 'system-ui', 'sans-serif'],
             },
             colors: {
+                /* Màu ck-* khai báo trong src/index.css @theme (Tailwind v4) */
                 border: "hsl(var(--border))",
                 input: "hsl(var(--input))",
                 ring: "hsl(var(--ring))",

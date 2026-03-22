@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { AuthContext } from '../../contexts/AuthContext';
+import BrandLogo from '../BrandLogo';
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -104,16 +105,14 @@ const Header = () => {
   };
 
   return (
-    <header className='bg-white shadow-md sticky top-0 z-50'>
+    <header className='bg-white/95 shadow-[0_4px_24px_-8px_rgba(26,20,35,0.12)] backdrop-blur-sm sticky top-0 z-50 border-b border-black/[0.04]'>
       <nav className='container mx-auto px-4 py-4'>
         <div className='flex items-center justify-between'>
           {/* Logo */}
-          <Link to='/' className='flex items-center space-x-2'>
-            <div className='bg-blue-600 text-white px-3 py-1 rounded-lg font-bold text-xl'>
-              SWP391
-            </div>
+          <Link to='/' className='flex items-center gap-2 sm:gap-3'>
+            <BrandLogo className='h-10 w-10 rounded-lg' />
             <span className='text-xl font-semibold text-gray-800 hidden sm:block'>
-              Learning Platform
+              CK Manager
             </span>
           </Link>
 
@@ -125,8 +124,8 @@ const Header = () => {
                 to={item.path}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1 ${
                   isActive(item.path)
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-ck-accent text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-ck-accent/5'
                 }`}
               >
                 {item.icon && <item.icon className='w-4 h-4' />}
@@ -143,7 +142,7 @@ const Header = () => {
                   onClick={toggleUserMenu}
                   className='flex items-center space-x-2 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors'
                 >
-                  <div className='w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-semibold'>
+                  <div className='w-8 h-8 bg-ck-accent rounded-full flex items-center justify-center text-white font-semibold'>
                     {user?.name?.[0]?.toUpperCase() || 'U'}
                   </div>
                   <span className='hidden md:block text-sm font-medium text-gray-700'>
@@ -159,7 +158,7 @@ const Header = () => {
                       <p className='text-sm font-semibold text-gray-900'>{user?.name}</p>
                       <p className='text-xs text-gray-500'>{user?.email}</p>
                       {user?.roleId && (
-                        <span className='inline-block mt-1 px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded'>
+                        <span className='inline-block mt-1 px-2 py-1 text-xs font-medium bg-ck-accent/10 text-ck-accent-hover rounded'>
                           {user.roleId.roleName}
                         </span>
                       )}
@@ -193,13 +192,13 @@ const Header = () => {
               <div className='flex items-center space-x-2'>
                 <Link
                   to='/login'
-                  className='px-4 py-2 text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors'
+                  className='px-4 py-2 text-sm font-medium text-gray-700 hover:text-ck-accent transition-colors'
                 >
                   Login
                 </Link>
                 <Link
                   to='/register'
-                  className='px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors'
+                  className='px-4 py-2 bg-ck-accent text-white rounded-[10px] text-sm font-medium hover:bg-ck-accent-hover transition-colors shadow-md'
                 >
                   Register
                 </Link>
@@ -228,8 +227,8 @@ const Header = () => {
                   onClick={() => setIsMenuOpen(false)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-2 ${
                     isActive(item.path)
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
+                      ? 'bg-ck-accent text-white shadow-sm'
+                      : 'text-gray-700 hover:bg-ck-accent/5'
                   }`}
                 >
                   {item.icon && <item.icon className='w-4 h-4' />}

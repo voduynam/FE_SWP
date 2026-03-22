@@ -192,7 +192,7 @@ export default function CentralKitchenDashboard() {
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard
-          title="Đơn chờ xử lý (SUBMITTED)"
+          title="Đơn chờ xử lý sản xuất"
           value={`${orders.length}`}
           icon={ClipboardList}
           color="primary"
@@ -260,7 +260,7 @@ export default function CentralKitchenDashboard() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <h2 className="text-base font-semibold mb-3">Đơn SUBMITTED (top)</h2>
+          <h2 className="text-base font-semibold mb-3">Đơn sản xuất chờ xử lý (top)</h2>
           {!recentOrders.length ? (
             <p className="text-sm text-muted-foreground py-4">Không có đơn.</p>
           ) : (
