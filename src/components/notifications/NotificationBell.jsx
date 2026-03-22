@@ -39,7 +39,7 @@ export default function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm ring-1 ring-[#946b74]/15 hover:bg-[#f7f4f6]"
       >
         <Bell className="h-4 w-4" />
         {unreadCount > 0 && (
@@ -66,7 +66,7 @@ export default function NotificationBell() {
               <button
                 type="button"
                 onClick={markAllAsRead}
-                className="text-xs font-medium text-orange-600 hover:text-orange-700"
+                className="text-xs font-medium text-ck-accent hover:text-ck-accent-hover"
               >
                 Đọc tất cả
               </button>
@@ -90,7 +90,7 @@ export default function NotificationBell() {
                   type="button"
                   onClick={() => handleClickItem(n)}
                   className={`flex w-full flex-col items-start gap-0.5 border-b border-slate-50 px-4 py-2.5 text-left text-xs transition-colors last:border-b-0 hover:bg-slate-50 ${
-                    n.is_read ? 'bg-white' : 'bg-orange-50/60'
+                    n.is_read ? 'bg-white' : 'bg-ck-accent/10'
                   }`}
                 >
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">

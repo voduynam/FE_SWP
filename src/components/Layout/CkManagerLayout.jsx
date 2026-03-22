@@ -35,7 +35,7 @@ const CkManagerLayout = () => {
     user?.full_name || user?.username || user?.name || "Người dùng";
 
   return (
-    <div className="h-screen flex bg-gray-50">
+    <div className="h-screen flex ck-app-bg">
       <Sidebar
         userRole={sidebarRole}
         userName={displayName}

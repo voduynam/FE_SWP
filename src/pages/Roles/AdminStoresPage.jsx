@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, MapPin, Package, Pencil, PlusCircle, RefreshCcw, Search, Store as StoreIcon, Trash2, X } from 'lucide-react';
+import {
+  ChefHat,
+  Download,
+  MapPin,
+  Package,
+  Pencil,
+  PlusCircle,
+  RefreshCcw,
+  Search,
+  Store as StoreIcon,
+  Trash2,
+  X,
+} from 'lucide-react';
 import StatusBadge from '../../components/ui/StatusBadges';
 import { workflowService } from '../../services/workflowService';
 
@@ -7,6 +19,29 @@ const getRows = data => {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.data)) return data.data;
   return [];
+};
+
+/** Nền / viền khác nhau: cửa hàng (STORE) vs bếp trung tâm (KITCHEN) */
+const orgUnitVisual = {
+  STORE: {
+    label: 'Cửa hàng',
+    cardClass:
+      'border-violet-200/90 bg-gradient-to-br from-violet-50 via-violet-50/80 to-fuchsia-50/40 shadow-md shadow-violet-900/[0.06]',
+    iconBox: 'bg-violet-100 text-violet-700',
+    chip: 'bg-violet-100/90 text-violet-800 ring-1 ring-violet-200/80',
+  },
+  KITCHEN: {
+    label: 'Bếp trung tâm',
+    cardClass:
+      'border-teal-200/90 bg-gradient-to-br from-teal-50 via-cyan-50/70 to-emerald-50/30 shadow-md shadow-teal-900/[0.06]',
+    iconBox: 'bg-teal-100 text-teal-800',
+    chip: 'bg-teal-100/90 text-teal-900 ring-1 ring-teal-200/80',
+  },
+};
+
+const getOrgUnitVisual = store => {
+  const t = (store?.type || 'STORE').toUpperCase();
+  return orgUnitVisual[t] || orgUnitVisual.STORE;
 };
 
 const TABS = [
@@ -336,16 +371,35 @@ export default function AdminStoresPage() {
           </div>
 
           <div className='grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3'>
-            {filteredStores.map(store => (
-              <div key={store._id} className='rounded-xl border border-border bg-card p-5 transition-all hover:shadow-lg'>
-                <div className='mb-4 flex items-start justify-between'>
-                  <div className='flex items-center gap-3'>
-                    <div className='flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10'>
-                      <StoreIcon className='h-6 w-6 text-primary' />
+            {filteredStores.map(store => {
+              const vis = getOrgUnitVisual(store);
+              const isKitchen = (store.type || '').toUpperCase() === 'KITCHEN';
+              return (
+              <div
+                key={store._id}
+                className={`rounded-xl border p-5 transition-all hover:shadow-lg ${vis.cardClass}`}
+              >
+                <div className='mb-4 flex items-start justify-between gap-2'>
+                  <div className='flex min-w-0 items-center gap-3'>
+                    <div
+                      className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl ${vis.iconBox}`}
+                    >
+                      {isKitchen ? (
+                        <ChefHat className='h-6 w-6' strokeWidth={2} />
+                      ) : (
+                        <StoreIcon className='h-6 w-6' strokeWidth={2} />
+                      )}
                     </div>
-                    <div>
-                      <h3 className='font-semibold'>{store.name || store._id}</h3>
-                      <p className='text-sm text-muted-foreground'>{store.code || '-'}</p>
+                    <div className='min-w-0'>
+                      <div className='mb-1 flex flex-wrap items-center gap-2'>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${vis.chip}`}
+                        >
+                          {vis.label}
+                        </span>
+                      </div>
+                      <h3 className='font-semibold text-slate-900'>{store.name || store._id}</h3>
+                      <p className='text-sm text-slate-600'>{store.code || '-'}</p>
                     </div>
                   </div>
                   <div className='flex items-center gap-2'>
@@ -369,16 +423,17 @@ export default function AdminStoresPage() {
                   </div>
                 </div>
 
-                <div className='text-sm text-muted-foreground'>
+                <div className='text-sm text-slate-600'>
                   <div className='flex items-start gap-2'>
-                    <MapPin className='mt-0.5 h-4 w-4 flex-shrink-0' />
+                    <MapPin className='mt-0.5 h-4 w-4 flex-shrink-0 opacity-80' />
                     <span>
                       {[store.address, store.district, store.city].filter(Boolean).join(', ') || 'Không có địa chỉ'}
                     </span>
                   </div>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
 
           {!loading && !filteredStores.length && (

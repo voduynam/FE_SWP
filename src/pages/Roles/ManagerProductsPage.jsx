@@ -115,7 +115,7 @@ export default function ManagerProductsPage() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Sản phẩm</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Quản lý danh sách thành phẩm, nguyên liệu và nhóm hàng (categories).
+            Quản lý danh sách thành phẩm, nguyên liệu và danh mục sản phẩm.
           </p>
         </div>
         <div className="flex gap-2">
@@ -157,14 +157,14 @@ export default function ManagerProductsPage() {
         <div className="border-b border-slate-200 px-4 py-3 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">
-              Sản phẩm & Categories
+              Sản phẩm & Danh mục sản phẩm
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
               {itemTab === "FINISHED"
                 ? "Danh sách các sản phẩm thành phẩm dùng để bán / xuất kho."
                 : itemTab === "RAW"
                   ? "Danh sách các nguyên liệu dùng trong sản xuất và chế biến."
-                  : "Danh sách nhóm hàng và số item gắn với từng category."}
+                  : "Danh sách nhóm hàng và số item gắn với từng danh mục."}
             </p>
           </div>
           <div className="inline-flex rounded-full bg-slate-100 p-1 text-xs font-medium text-slate-600">
@@ -199,7 +199,7 @@ export default function ManagerProductsPage() {
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Categories
+              Danh mục sản phẩm
             </button>
           </div>
         </div>
@@ -217,22 +217,22 @@ export default function ManagerProductsPage() {
                     code: categoryForm.code.trim() || undefined,
                   };
                   if (!payload.name) {
-                    setError("Tên category không được để trống.");
+                    setError("Tên danh mục không được để trống.");
                     return;
                   }
                   const res = await workflowService.createCategory(payload);
                   if (!res.success) {
-                    setError(res.message || "Không thể tạo category");
+                    setError(res.message || "Không thể tạo danh mục");
                     return;
                   }
                   setCategoryForm({ name: "", code: "" });
-                  setSuccess("Tạo category mới thành công.");
+                  setSuccess("Tạo danh mục mới thành công.");
                   loadData();
                 }}
               >
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-slate-700">
-                    Tên category
+                    Tên danh mục
                   </label>
                   <input
                     type="text"
@@ -265,17 +265,17 @@ export default function ManagerProductsPage() {
                     className="w-full rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600"
                     disabled={loading}
                   >
-                    Thêm category
+                    Thêm danh mục
                   </button>
                 </div>
               </form>
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-4 py-3">Category</th>
+                    <th className="px-4 py-3">Danh mục</th>
                     <th className="px-4 py-3">ID</th>
-                    <th className="px-4 py-3">Số item</th>
-                    <th className="px-4 py-3">Danh sách item</th>
+                    <th className="px-4 py-3">Số sản phẩm</th>
+                    <th className="px-4 py-3">Danh sách sản phẩm</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -295,7 +295,7 @@ export default function ManagerProductsPage() {
                         colSpan={4}
                         className="px-4 py-6 text-center text-slate-400"
                       >
-                        Không có category
+                        Không có danh mục
                       </td>
                     </tr>
                   )}
@@ -325,7 +325,7 @@ export default function ManagerProductsPage() {
                 <tr>
                   <th className="px-4 py-3">Tên</th>
                   <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">Category</th>
+                  <th className="px-4 py-3">Danh mục</th>
                   <th className="px-4 py-3">Trạng thái</th>
                   <th className="px-4 py-3 text-right">Thao tác</th>
                 </tr>
@@ -527,7 +527,7 @@ export default function ManagerProductsPage() {
                     <span className="col-span-2 font-medium text-slate-900">
                       {detailItem.name || "-"}
                     </span>
-                    <span className="text-slate-500">Category</span>
+                    <span className="text-slate-500">Danh mục</span>
                     <span className="col-span-2">
                       {detailItem.category_id?.name ||
                         categoryNameById[
@@ -827,15 +827,15 @@ export default function ManagerProductsPage() {
                     }
                     className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-orange-400"
                   >
-                    <option value="ACTIVE">ACTIVE</option>
-                    <option value="INACTIVE">INACTIVE</option>
+                    <option value="ACTIVE">Hoạt động</option>
+                    <option value="INACTIVE">Ngừng hoạt động</option>
                   </select>
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700">
-                  Category
+                  Danh mục
                 </label>
                 <select
                   value={itemForm.category_id}
@@ -858,7 +858,7 @@ export default function ManagerProductsPage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700">
-                  Đơn vị tính cơ bản (Base UOM)
+                  Đơn vị tính cơ bản 
                 </label>
                 <select
                   required

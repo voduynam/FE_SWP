@@ -63,9 +63,9 @@ export default function AdminSettingsPage() {
     <div className='space-y-6 animate-fade-in'>
       <div className='flex items-center justify-between'>
         <div>
-          <h1 className='text-3xl font-bold text-slate-900'>Cấu hình Master Data</h1>
+          <h1 className='text-3xl font-bold text-slate-900'>Cấu hình hệ thống</h1>
           <p className='mt-1 text-sm text-slate-500'>
-            Admin quản lý đơn vị tính, nhóm hàng, nhà cung cấp, đơn vị tổ chức, vị trí kho và vai trò người dùng.
+            Admin quản lý đơn vị tính, danh mục sản phẩm.
           </p>
         </div>
         <button

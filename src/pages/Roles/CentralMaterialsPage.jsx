@@ -22,6 +22,32 @@ const getItemName = v => { if (!v) return '-'; if (typeof v === 'object') return
 const getLocName = v => { if (!v) return '-'; if (typeof v === 'object') return v.name || v.code || v._id || '-'; return v; };
 const getLotCode = v => { if (!v) return '-'; if (typeof v === 'object') return v.lot_code || v._id || '-'; return v; };
 
+/** Trạng thái lô theo HSD — chỉ FE, khớp badge trong bảng */
+function getLotStatusKey(lot) {
+  if (!lot?.exp_date) return 'NO_EXPIRY';
+  const exp = new Date(lot.exp_date);
+  const now = new Date();
+  if (exp < now) return 'EXPIRED';
+  const daysLeft = Math.ceil((exp - now) / 86400000);
+  if (daysLeft <= 7) return 'EXPIRING_SOON';
+  return 'OK';
+}
+
+function getLotStatusBadge(lot) {
+  const key = getLotStatusKey(lot);
+  if (key === 'NO_EXPIRY') {
+    return <span className='rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600'>Chưa có HSD</span>;
+  }
+  if (key === 'EXPIRED') {
+    return <span className='rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700'>Hết hạn</span>;
+  }
+  const daysLeft = lot.exp_date ? Math.ceil((new Date(lot.exp_date) - new Date()) / 86400000) : null;
+  if (key === 'EXPIRING_SOON' && daysLeft != null) {
+    return <span className='rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700'>Còn {daysLeft} ngày</span>;
+  }
+  return <span className='rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700'>Bình thường</span>;
+}
+
 export default function CentralMaterialsPage() {
   const [tab, setTab] = useState('lots');
   const [loading, setLoading] = useState(false);
@@ -32,6 +58,7 @@ export default function CentralMaterialsPage() {
   const [lots, setLots] = useState([]);
   const [lotPag, setLotPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [lotSearch, setLotSearch] = useState('');
+  const [lotStatusFilter, setLotStatusFilter] = useState('');
   const [lotInventoryMap, setLotInventoryMap] = useState({});
 
   // Expiring
@@ -149,11 +176,25 @@ export default function CentralMaterialsPage() {
   useEffect(() => { if (tab === 'transactions') loadTxns(1); }, [tab, txnTypeFilter]);
   useEffect(() => { if (tab === 'expiring') loadExpiry(); }, [expiryDays]);
 
-  const filteredLots = useMemo(() => {
+  const searchFilteredLots = useMemo(() => {
     const s = (lotSearch || '').toLowerCase();
     if (!s) return lots;
     return lots.filter(l => (l.lot_code || '').toLowerCase().includes(s) || getItemName(l.item_id).toLowerCase().includes(s));
   }, [lots, lotSearch]);
+
+  const lotStatusCounts = useMemo(() => {
+    const c = { EXPIRED: 0, EXPIRING_SOON: 0, OK: 0, NO_EXPIRY: 0 };
+    searchFilteredLots.forEach(l => {
+      const k = getLotStatusKey(l);
+      if (c[k] !== undefined) c[k] += 1;
+    });
+    return c;
+  }, [searchFilteredLots]);
+
+  const filteredLots = useMemo(() => {
+    if (!lotStatusFilter) return searchFilteredLots;
+    return searchFilteredLots.filter(l => getLotStatusKey(l) === lotStatusFilter);
+  }, [searchFilteredLots, lotStatusFilter]);
 
   const filteredTxns = useMemo(() => {
     const s = (txnSearch || '').toLowerCase();
@@ -267,6 +308,30 @@ export default function CentralMaterialsPage() {
             <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
             <input value={lotSearch} onChange={e => setLotSearch(e.target.value)} placeholder='Tìm theo mã lô / sản phẩm...' className='w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm' />
           </div>
+          <div className='flex flex-wrap items-center gap-2'>
+            <span className='text-xs font-medium text-slate-500'>Lọc theo trạng thái lô:</span>
+            {[
+              { key: '', label: 'Tất cả', count: searchFilteredLots.length, active: 'border-slate-300 bg-slate-900 text-white' },
+              { key: 'EXPIRED', label: 'Hết hạn', count: lotStatusCounts.EXPIRED, active: 'border-red-300 bg-red-600 text-white' },
+              { key: 'EXPIRING_SOON', label: 'Sắp hết hạn (≤7 ngày)', count: lotStatusCounts.EXPIRING_SOON, active: 'border-amber-300 bg-amber-600 text-white' },
+              { key: 'OK', label: 'Bình thường', count: lotStatusCounts.OK, active: 'border-emerald-300 bg-emerald-600 text-white' },
+              { key: 'NO_EXPIRY', label: 'Chưa có HSD', count: lotStatusCounts.NO_EXPIRY, active: 'border-slate-400 bg-slate-600 text-white' },
+            ].map(opt => (
+              <button
+                key={opt.key || 'all'}
+                type='button'
+                onClick={() => setLotStatusFilter(opt.key)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                  lotStatusFilter === opt.key ? opt.active : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {opt.label}
+                <span className={`rounded-full px-1.5 py-0 text-[10px] font-semibold ${lotStatusFilter === opt.key ? 'bg-white/20' : 'bg-slate-100 text-slate-600'}`}>
+                  {opt.count}
+                </span>
+              </button>
+            ))}
+          </div>
           <div className='overflow-x-auto rounded-xl border border-slate-200 bg-white'>
             <table className='w-full text-sm'>
               <thead className='border-b border-slate-200 bg-slate-50/80 text-left'>
@@ -277,16 +342,25 @@ export default function CentralMaterialsPage() {
                   <th className='px-4 py-3 font-medium text-slate-600'>Hạn SD</th>
                   <th className='px-4 py-3 font-medium text-slate-600'>Tồn kho (hệ thống)</th>
                   <th className='px-4 py-3 font-medium text-slate-600'>Trạng thái</th>
-                  <th className='px-4 py-3 font-medium text-slate-600'></th>
+                  <th className='px-4 py-3 font-medium text-slate-600'>Thao tác</th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100'>
                 {loading && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-                {!loading && !filteredLots.length && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Không có lô hàng nào.</td></tr>}
-                {!loading && filteredLots.map((lot, idx) => {
-                  const isExpired = lot.exp_date && new Date(lot.exp_date) < new Date();
-                  const daysLeft = lot.exp_date ? Math.ceil((new Date(lot.exp_date) - new Date()) / 86400000) : null;
-                  return (
+                {!loading && !filteredLots.length && (
+                  <tr>
+                    <td colSpan={7} className='px-4 py-6 text-center text-slate-400'>
+                      {!lots.length
+                        ? 'Không có lô hàng nào.'
+                        : !searchFilteredLots.length
+                          ? 'Không có lô khớp tìm kiếm.'
+                          : lotStatusFilter
+                            ? 'Không có lô nào ở trạng thái đã chọn trên trang hiện tại.'
+                            : 'Không có lô hàng nào.'}
+                    </td>
+                  </tr>
+                )}
+                {!loading && filteredLots.map((lot, idx) => (
                     <tr key={lot._id || idx} className='hover:bg-slate-50/50'>
                       <td className='px-4 py-3 font-mono text-sm font-medium text-slate-900'>{lot.lot_code || '-'}</td>
                       <td className='px-4 py-3 text-slate-700'>{getItemName(lot.item_id)}</td>
@@ -298,19 +372,13 @@ export default function CentralMaterialsPage() {
                           : <span className='text-xs text-slate-400'>Chưa có dữ liệu</span>}
                       </td>
                       <td className='px-4 py-3'>
-                        {isExpired
-                          ? <span className='rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700'>Hết hạn</span>
-                          : daysLeft != null && daysLeft <= 7
-                            ? <span className='rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700'>Còn {daysLeft} ngày</span>
-                            : <span className='rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700'>Bình thường</span>
-                        }
+                        {getLotStatusBadge(lot)}
                       </td>
                       <td className='px-4 py-3'>
                         <button onClick={() => openEditLot(lot)} className='text-xs text-blue-600 hover:underline'>Sửa</button>
                       </td>
                     </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>

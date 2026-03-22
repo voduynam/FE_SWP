@@ -19,7 +19,7 @@ const severityClasses = {
   EXPIRED:
     'bg-red-100 text-red-700 ring-2 ring-red-200 hover:bg-red-200 hover:ring-red-300',
   CRITICAL:
-    'bg-orange-100 text-orange-700 ring-2 ring-orange-200 hover:bg-orange-200 hover:ring-orange-300',
+    'bg-[#946b74]/15 text-[#632f3a] ring-2 ring-[#946b74]/25 hover:bg-[#946b74]/25 hover:ring-[#946b74]/35',
   HIGH:
     'bg-yellow-100 text-yellow-700 ring-2 ring-yellow-200 hover:bg-yellow-200 hover:ring-yellow-300',
   MEDIUM:

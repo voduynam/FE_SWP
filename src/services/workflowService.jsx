@@ -258,8 +258,21 @@ export const workflowService = {
     withResult(() => axiosInstance.post('/consolidated-orders/generate', payload)),
   getExceptions: params =>
     withResult(() => axiosInstance.get('/exceptions', { params })),
+  /** GET /api/exceptions/:id — chi tiết một sự cố */
+  getException: id =>
+    withResult(() => axiosInstance.get(`/exceptions/${encodeURIComponent(id)}`)),
+  /** POST /api/exceptions */
+  createException: payload =>
+    withResult(() => axiosInstance.post('/exceptions', payload)),
+  /** PUT /api/exceptions/:id */
+  updateException: (id, payload) =>
+    withResult(() =>
+      axiosInstance.put(`/exceptions/${encodeURIComponent(id)}`, payload),
+    ),
   resolveException: (id, payload) =>
-    withResult(() => axiosInstance.put(`/exceptions/${id}/resolve`, payload)),
+    withResult(() =>
+      axiosInstance.put(`/exceptions/${encodeURIComponent(id)}/resolve`, payload),
+    ),
 
   // Inventory + alerts
   getInventoryBalances: params =>

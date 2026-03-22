@@ -659,7 +659,7 @@ export default function CentralShipmentsPage() {
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Giao hàng</h1>
           <p className='mt-1 text-sm text-slate-500'>
-            Supply Coordinator tạo phiếu giao hàng từ các đơn đã hoàn thành sản xuất (chọn đơn, kho xuất/nhận, lot) và điều phối giao hàng.
+            Theo dõi trạng thái giao hàng từ các đơn hàng đã hoàn thành sản xuất.
           </p>
         </div>
         <div className='flex gap-2'>
@@ -800,7 +800,7 @@ export default function CentralShipmentsPage() {
                   return (
                     <div className='rounded-lg border border-emerald-100 bg-emerald-50/60 p-3'>
                       <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700'>
-                        Ảnh giao hàng (Proof of Delivery)
+                        Ảnh giao hàng
                       </h3>
                       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4'>
                         {!imageError && (
@@ -819,11 +819,11 @@ export default function CentralShipmentsPage() {
                         )}
                         <div className='text-xs text-emerald-700'>
                           <p>
-                            Ảnh được tải lên khi Driver xác nhận trạng thái <strong>DELIVERED</strong>.
+                            Ảnh được tải lên khi Driver xác nhận trạng thái <strong>Đã giao hàng</strong>.
                           </p>
                           {detailShipment.delivery_photo_uploaded_at && (
                             <p className='mt-1 text-emerald-600/80'>
-                              Thời gian upload:{' '}
+                              Thời gian tải lên:{' '}
                               {new Date(detailShipment.delivery_photo_uploaded_at).toLocaleString('vi-VN')}
                             </p>
                           )}
@@ -932,7 +932,7 @@ export default function CentralShipmentsPage() {
               {/* Select order */}
               <div>
                 <label className='block text-sm font-medium text-slate-700'>
-                  Chọn đơn hàng ({ORDER_STATUS_FOR_SHIPMENT.join(' / ')} — chỉ đơn chưa có phiếu giao)
+                  Chọn đơn hàng (chỉ đơn đã hoàn thành sản xuất và chưa có phiếu giao)
                 </label>
                 <select
                   value={selectedOrderId}

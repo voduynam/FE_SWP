@@ -247,7 +247,7 @@ export default function ManagerReportsPage() {
             <div className='mb-2 flex items-center justify-between'>
               <div>
                 <div className='text-[11px] font-semibold uppercase tracking-wide text-sky-600'>
-                  DELIVERY_PERFORMANCE
+                  Hiệu suất giao hàng
                 </div>
                 <div className='mt-0.5 text-xs text-slate-500'>Giao hàng đúng hạn</div>
               </div>
@@ -296,7 +296,7 @@ export default function ManagerReportsPage() {
             <div className='mb-2 flex items-center justify-between'>
               <div>
                 <div className='text-[11px] font-semibold uppercase tracking-wide text-emerald-600'>
-                  ORDER_FULFILLMENT
+                  Hiệu suất hoàn thành đơn hàng
                 </div>
                 <div className='mt-0.5 text-xs text-slate-500'>Hoàn tất đơn hàng</div>
               </div>
@@ -345,7 +345,7 @@ export default function ManagerReportsPage() {
             <div className='mb-2 flex items-center justify-between'>
               <div>
                 <div className='text-[11px] font-semibold uppercase tracking-wide text-rose-600'>
-                  EXCEPTION_HANDLING
+                  Hiệu suất xử lý ngoại lệ
                 </div>
                 <div className='mt-0.5 text-xs text-slate-500'>Xử lý ngoại lệ</div>
               </div>
@@ -373,7 +373,7 @@ export default function ManagerReportsPage() {
                     </td>
                   </tr>
                   <tr>
-                    <td className='py-1 pr-2 text-slate-500'>CRITICAL</td>
+                    <td className='py-1 pr-2 text-slate-500'>Nghiêm trọng</td>
                     <td className='py-1 text-right font-semibold text-rose-700'>
                       {exceptionPerf.metrics?.critical_exceptions ?? '-'}
                     </td>

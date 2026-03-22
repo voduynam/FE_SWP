@@ -298,7 +298,7 @@ export default function CentralOrdersPage() {
       <div className='flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>
-            Đơn hàng từ cửa hàng franchise
+            Đơn hàng từ cửa hàng 
           </h1>
           <p className='mt-1 text-sm text-slate-500'>
             Xem chi tiết đơn trước khi phê duyệt hoặc từ chối.

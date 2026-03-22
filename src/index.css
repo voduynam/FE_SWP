@@ -1,29 +1,50 @@
 @import 'tailwindcss';
 
+/* Palette CK — dùng chung với trang đăng nhập (Tailwind v4 @theme) */
+@theme {
+  --color-ck-accent: #946b74;
+  --color-ck-accent-hover: #7a5560;
+  --color-ck-gold: #c9a227;
+  --color-ck-gold-light: #e8c878;
+  --color-ck-midnight: #1a2332;
+  --color-ck-wine: #2d1f28;
+  --color-ck-ink: #1e2a3d;
+  --color-ck-surface: #f7f4f6;
+  --color-ck-surface-deep: #f0ebe8;
+}
+
 @layer base {
   :root {
-    /* Theme Colors */
+    /* Theme — đồng bộ trang đăng nhập (Trung Thu: rose + vàng + xanh đêm) */
+    --ck-accent: #946b74;
+    --ck-accent-hover: #7a5560;
+    --ck-gold: #c9a227;
+    --ck-gold-light: #e8c878;
+    --ck-midnight: #1a2332;
+    --ck-wine: #2d1f28;
+    --ck-ink: #1e2a3d;
+
     --primary: #1e40af;
     --primary-light: #3b82f6;
     --primary-dark: #1e3a8a;
-    --secondary: #f59e0b;
-    --secondary-light: #fbbf24;
+    --secondary: #c9a227;
+    --secondary-light: #e8c878;
     --destructive: #ef4444;
     --success: #10b981;
-    --warning: #f59e0b;
+    --warning: #d4a24c;
     --muted: #6b7280;
     --muted-light: #d1d5db;
-    --border: #e5e7eb;
-    --background: #f9fafb;
+    --border: #e8e2e4;
+    --background: #f7f4f6;
     --card: #ffffff;
-    
+
     font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
     line-height: 1.5;
     font-weight: 400;
-    
+
     color-scheme: light;
     color: #1f2937;
-    background-color: #f9fafb;
+    background-color: #f7f4f6;
     
     font-synthesis: none;
     text-rendering: optimizeLegibility;
@@ -40,7 +61,7 @@
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background-color: #f9fafb;
+    background-color: #f7f4f6;
   }
   
   #root {
@@ -55,16 +76,16 @@
   }
   
   ::-webkit-scrollbar-track {
-    background: #f3f4f6;
+    background: #ede8ea;
   }
-  
+
   ::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: rgba(148, 107, 116, 0.35);
     border-radius: 4px;
   }
-  
+
   ::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
+    background: rgba(148, 107, 116, 0.55);
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -73,51 +94,90 @@
 }
 
 @layer utilities {
-  /* Color utilities */
-  .bg-primary { @apply bg-blue-600; }
-  .bg-primary-light { @apply bg-blue-500; }
-  .bg-secondary { @apply bg-amber-500; }
-  .text-primary { @apply text-blue-600; }
-  .text-secondary { @apply text-amber-600; }
-  .text-muted { @apply text-gray-500; }
-  .text-muted-foreground { @apply text-gray-600; }
-  .text-destructive { @apply text-red-500; }
-  .border-border { @apply border-gray-300; }
+  /* Nền toàn app — nhẹ, cùng tông với login */
+  .ck-app-bg {
+    background:
+      radial-gradient(ellipse 100% 55% at 100% 0%, rgba(148, 107, 116, 0.07), transparent 52%),
+      radial-gradient(ellipse 80% 45% at 0% 100%, rgba(201, 162, 39, 0.06), transparent 48%),
+      linear-gradient(180deg, #f8f6f7 0%, #f3f0f1 50%, #f7f4f6 100%);
+  }
+
+  /* Giống nền trang đăng nhập */
+  .login-mid-autumn-bg {
+    background:
+      radial-gradient(ellipse 120% 80% at 50% -20%, rgba(201, 162, 39, 0.18), transparent 50%),
+      radial-gradient(ellipse 80% 50% at 100% 50%, rgba(148, 107, 116, 0.15), transparent 45%),
+      linear-gradient(160deg, #1a2332 0%, #2d1f28 45%, #1e2a3d 100%);
+  }
+
+  /* Sidebar — gradient đêm / ấm */
+  .ck-sidebar-bg {
+    background: linear-gradient(180deg, #1a2332 0%, #231c2e 48%, #1e2a3d 100%);
+  }
+
+  /* Color utilities (legacy) — ưu tiên tông CK */
+  .bg-primary {
+    @apply bg-ck-accent;
+  }
+  .bg-primary-light {
+    @apply bg-ck-accent/90;
+  }
+  .bg-secondary {
+    @apply bg-ck-gold;
+  }
+  .text-primary {
+    @apply text-ck-accent;
+  }
+  .text-secondary {
+    @apply text-ck-gold;
+  }
+  .text-muted {
+    @apply text-gray-500;
+  }
+  .text-muted-foreground {
+    @apply text-gray-600;
+  }
+  .text-destructive {
+    @apply text-red-500;
+  }
+  .border-border {
+    @apply border-gray-200;
+  }
 
   /* Gradients */
   .gradient-hero {
-    background: linear-gradient(135deg, #1e3a5f 0%, #2c4a6f 40%, #8b5e2e 100%);
+    background: linear-gradient(145deg, #1a2332 0%, #2d1f28 45%, #946b74 100%);
   }
 
   .gradient-secondary {
-    background: linear-gradient(135deg, #f59e0b, #fb923c);
+    background: linear-gradient(145deg, #946b74 0%, #7a5560 45%, #c9a227 100%);
   }
 
   /* Cards */
   .glass-card {
-    @apply bg-white rounded-xl shadow-lg border border-gray-200;
+    @apply bg-white rounded-2xl shadow-[0_8px_30px_-8px_rgba(26,20,35,0.12)] border border-black/[0.06];
   }
 
   .stat-card {
-    @apply bg-white rounded-lg p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow;
+    @apply bg-white rounded-xl p-6 shadow-sm border border-black/[0.06] hover:shadow-md transition-shadow;
   }
 
   /* Form elements */
   .input-field {
-    @apply w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition;
+    @apply w-full rounded-[10px] border border-gray-200 bg-white px-4 py-2.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)] focus:outline-none focus:ring-2 focus:ring-ck-accent/20 focus:border-ck-accent/40 transition;
   }
 
   /* Buttons */
   .btn-primary {
-    @apply rounded-lg bg-blue-600 text-white px-4 py-2.5 font-medium hover:bg-blue-700 active:scale-95 transition shadow-md;
+    @apply rounded-[10px] bg-ck-accent text-white px-4 py-2.5 font-medium hover:bg-ck-accent-hover active:scale-[0.98] transition shadow-[0_6px_20px_-4px_rgba(148,107,116,0.4)];
   }
 
   .btn-secondary {
-    @apply w-full rounded-lg bg-orange-500 text-white py-2.5 font-medium hover:bg-orange-600 active:scale-[0.98] transition shadow-md;
+    @apply w-full rounded-[10px] bg-ck-gold text-white py-2.5 font-medium hover:brightness-95 active:scale-[0.98] transition shadow-md;
   }
 
   .btn-outline {
-    @apply rounded-lg border-2 border-gray-300 bg-white text-gray-700 px-4 py-2 font-medium hover:bg-gray-50 transition;
+    @apply rounded-[10px] border-2 border-gray-200 bg-white text-gray-700 px-4 py-2 font-medium hover:bg-ck-surface hover:border-ck-accent/25 transition;
   }
 
   /* Badge */
@@ -138,7 +198,7 @@
   }
 
   .badge-primary {
-    @apply bg-blue-100 text-blue-800;
+    @apply bg-ck-accent/15 text-ck-accent-hover;
   }
 
   /* Animation */
@@ -183,12 +243,12 @@
     @apply lg:ml-72 ml-0 transition-all;
   }
 
-  /* Nav links */
+  /* Nav links (layout tối) */
   .nav-link {
-    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 transition hover:bg-slate-800 hover:text-white;
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 transition hover:bg-white/5 hover:text-white;
   }
 
   .nav-link-active {
-    @apply bg-orange-500 text-white;
+    @apply bg-white/10 text-white border-l-[3px] border-ck-gold;
   }
 }
