@@ -1,10 +1,14 @@
 import axios from 'axios';
 import axiosInstance from '../utils/axiosInstance';
 
-// Base URL cho BE. Khuyến nghị đặt VITE_API_URL = 'http://localhost:5001'
-// để các endpoint dùng đúng path /api/... theo swagger.
+// Base URL cho BE (bắt buộc include `/api`).
+// Quy ước:
+// - Nếu có `VITE_API_URL` thì dùng thẳng.
+// - Nếu dev và chưa set env thì dùng `/api` để Vite proxy chuyển tiếp backend.
+// - Nếu production mà không set env thì fallback thẳng tới backend local `/api`.
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5001';
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? '/api' : 'http://localhost:5001/api');
 
 export const authService = {
   // Token management
@@ -73,7 +77,7 @@ export const authService = {
   login: async (username, password) => {
     try {
       const response = await axios.post(
-        `${API_BASE_URL}/api/auth/login`,
+        `${API_BASE_URL}/auth/login`,
         { username, password },
         { withCredentials: true }
       );
