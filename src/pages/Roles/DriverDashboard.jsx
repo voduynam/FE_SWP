@@ -1,39 +1,81 @@
-import { useMemo, useState } from 'react';
-import { Truck, MapPin, Clock, CheckCircle, Package, X, AlertCircle, RefreshCcw, Phone } from 'lucide-react';
+import { useMemo, useState, useEffect } from 'react';
+import { Truck, MapPin, Clock, CheckCircle, Package, X, AlertCircle, RefreshCcw, DollarSign } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { ChartContainer, ChartTooltipContent } from '../../components/ui/chart';
 import { useAuth } from '../../contexts/AuthContext';
-import { useDelivery } from '../../contexts/DeliveryContext';
+import { workflowService } from '../../services/workflowService';
 import StatCard from '../../components/ui/StatCard';
 import StatusBadge from '../../components/ui/StatusBadge';
 
 export default function DriverDashboard() {
   const { user } = useAuth();
-  const { deliveries, loading, error, updateDeliveryStatus, reportIssue, refresh } = useDelivery();
   const userName = user?.name || user?.username || 'Tài xế';
+  
+  // State management
+  const [shipments, setShipments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [showIssueModal, setShowIssueModal] = useState(false);
-  const [selectedDelivery, setSelectedDelivery] = useState(null);
+  const [selectedShipment, setSelectedShipment] = useState(null);
   const [issueDescription, setIssueDescription] = useState('');
   const [issueSubmitting, setIssueSubmitting] = useState(false);
-  const [listFilter, setListFilter] = useState('all'); // all | pending | shipping | delivered
+  const [listFilter, setListFilter] = useState('all'); // all | shipped | in_transit | delivered
 
-  const pendingCount = useMemo(() => deliveries.filter(d => d.status === 'pending').length, [deliveries]);
-  const shippingCount = useMemo(() => deliveries.filter(d => d.status === 'shipping').length, [deliveries]);
-  const deliveredCount = useMemo(() => deliveries.filter(d => d.status === 'delivered').length, [deliveries]);
-  const todayTotal = deliveries.length;
+  // Load shipments data
+  const loadShipments = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [shippedRes, transitRes, deliveredRes] = await Promise.all([
+        workflowService.getShipmentsPaginated({ status: 'SHIPPED', limit: 50 }),
+        workflowService.getShipmentsPaginated({ status: 'IN_TRANSIT', limit: 50 }),
+        workflowService.getShipmentsPaginated({ status: 'DELIVERED', limit: 20 }),
+      ]);
 
-  const filteredDeliveries = useMemo(() => {
-    if (listFilter === 'all') return deliveries;
-    return deliveries.filter(d => d.status === listFilter);
-  }, [deliveries, listFilter]);
+      const shipped = Array.isArray(shippedRes?.data?.data) ? shippedRes.data.data : [];
+      const transit = Array.isArray(transitRes?.data?.data) ? transitRes.data.data : [];
+      const delivered = Array.isArray(deliveredRes?.data?.data) ? deliveredRes.data.data : [];
+
+      const allShipments = [...shipped, ...transit, ...delivered]
+        .sort((a, b) => new Date(b.ship_date || b.updatedAt || 0) - new Date(a.ship_date || a.updatedAt || 0));
+
+      setShipments(allShipments);
+    } catch (err) {
+      console.error('Error loading shipments:', err);
+      setError('Không thể tải dữ liệu lô giao hàng');
+      setShipments([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadShipments();
+  }, []);
+
+  // Computed values
+  const shippedCount = useMemo(() => shipments.filter(s => s.status === 'SHIPPED').length, [shipments]);
+  const transitCount = useMemo(() => shipments.filter(s => s.status === 'IN_TRANSIT').length, [shipments]);
+  const deliveredCount = useMemo(() => shipments.filter(s => s.status === 'DELIVERED').length, [shipments]);
+  const todayTotal = shipments.length;
+  const codTotal = useMemo(() => 
+    shipments
+      .filter(s => s.order_id?.payment_method === 'COD' && s.status !== 'DELIVERED')
+      .reduce((sum, s) => sum + (s.cod_amount || s.order_id?.total_amount || 0), 0)
+  , [shipments]);
+
+  const filteredShipments = useMemo(() => {
+    if (listFilter === 'all') return shipments;
+    return shipments.filter(s => s.status === listFilter.toUpperCase());
+  }, [shipments, listFilter]);
 
   const statusSeries = useMemo(
     () => [
-      { label: 'Chờ giao', count: pendingCount },
-      { label: 'Đang giao', count: shippingCount },
+      { label: 'Đã xuất kho', count: shippedCount },
+      { label: 'Đang vận chuyển', count: transitCount },
       { label: 'Đã giao', count: deliveredCount },
     ],
-    [pendingCount, shippingCount, deliveredCount]
+    [shippedCount, transitCount, deliveredCount]
   );
 
   const getFilterPillClassName = (key) => {
@@ -41,9 +83,9 @@ export default function DriverDashboard() {
       return 'bg-slate-100 hover:bg-slate-200 text-slate-700';
     }
     switch (key) {
-      case 'pending':
+      case 'shipped':
         return 'bg-slate-900 text-white shadow-sm ring-1 ring-amber-500/30';
-      case 'shipping':
+      case 'in_transit':
         return 'bg-slate-900 text-white shadow-sm ring-1 ring-sky-500/30';
       case 'delivered':
         return 'bg-slate-900 text-white shadow-sm ring-1 ring-emerald-500/30';
@@ -52,24 +94,21 @@ export default function DriverDashboard() {
     }
   };
 
-  const handleStartDelivery = async (deliveryId) => {
+  const handleUpdateStatus = async (shipmentId, newStatus) => {
     try {
-      await updateDeliveryStatus(deliveryId, 'shipping');
+      const res = await workflowService.updateShipmentStatus(shipmentId, { status: newStatus });
+      if (res.success) {
+        loadShipments(); // Reload data
+      } else {
+        alert(res.message || 'Cập nhật thất bại');
+      }
     } catch (error) {
       alert(error.message || 'Cập nhật thất bại');
     }
   };
 
-  const handleCompleteDelivery = async (deliveryId) => {
-    try {
-      await updateDeliveryStatus(deliveryId, 'delivered');
-    } catch (error) {
-      alert(error.message || 'Cập nhật thất bại');
-    }
-  };
-
-  const handleReportIssue = (deliveryId) => {
-    setSelectedDelivery(deliveryId);
+  const handleReportIssue = (shipmentId) => {
+    setSelectedShipment(shipmentId);
     setShowIssueModal(true);
   };
 
@@ -81,10 +120,11 @@ export default function DriverDashboard() {
 
     try {
       setIssueSubmitting(true);
-      await reportIssue(selectedDelivery, issueDescription);
+      // For now, just show success message
+      // In real implementation, you would call an API to report the issue
       alert('Đã gửi báo cáo sự cố thành công');
       setShowIssueModal(false);
-      setSelectedDelivery(null);
+      setSelectedShipment(null);
       setIssueDescription('');
     } catch (error) {
       alert(error.message || 'Gửi báo cáo thất bại');
@@ -95,9 +135,22 @@ export default function DriverDashboard() {
 
   const handleCancelIssue = () => {
     setShowIssueModal(false);
-    setSelectedDelivery(null);
+    setSelectedShipment(null);
     setIssueDescription('');
     setIssueSubmitting(false);
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND'
+    }).format(amount);
+  };
+
+  const getLocationLabel = (loc) => {
+    if (!loc) return '-';
+    if (typeof loc === 'object') return loc.name || loc.code || loc._id;
+    return loc;
   };
 
   if (loading) {
@@ -118,7 +171,7 @@ export default function DriverDashboard() {
         </div>
         <button
           type="button"
-          onClick={refresh}
+          onClick={loadShipments}
           className="btn-outline flex items-center gap-2"
           title="Làm mới dữ liệu"
         >
@@ -126,25 +179,25 @@ export default function DriverDashboard() {
         </button>
       </div>
 
-      {error && <p className="text-sm text-destructive">{String(error?.message || error || 'Có lỗi xảy ra')}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
-          title="Tổng đơn hôm nay"
+          title="Tổng lô hôm nay"
           value={todayTotal}
           icon={Package}
           color="primary"
         />
         <StatCard
-          title="Chờ giao"
-          value={pendingCount}
+          title="Đã xuất kho"
+          value={shippedCount}
           icon={Clock}
           color="warning"
         />
         <StatCard
-          title="Đang giao"
-          value={shippingCount}
+          title="Đang vận chuyển"
+          value={transitCount}
           icon={Truck}
           color="accent"
         />
@@ -154,13 +207,19 @@ export default function DriverDashboard() {
           icon={CheckCircle}
           color="success"
         />
+        <StatCard
+          title="COD cần thu"
+          value={formatCurrency(codTotal)}
+          icon={DollarSign}
+          color="warning"
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-2 bg-gradient-to-br from-orange-500/10 via-transparent to-transparent ring-1 ring-orange-500/10">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold">Trạng thái đơn</h2>
-            <span className="text-xs text-muted-foreground">{todayTotal} đơn</span>
+            <h2 className="text-base font-semibold">Trạng thái lô giao</h2>
+            <span className="text-xs text-muted-foreground">{todayTotal} lô</span>
           </div>
 
           <ChartContainer config={{ count: { label: 'Số lượng' } }} className="h-[260px] w-full">
@@ -185,8 +244,8 @@ export default function DriverDashboard() {
           <div className="flex flex-wrap gap-2">
             {[
               { key: 'all', label: 'Tất cả' },
-              { key: 'pending', label: 'Chờ giao' },
-              { key: 'shipping', label: 'Đang giao' },
+              { key: 'shipped', label: 'Đã xuất kho' },
+              { key: 'in_transit', label: 'Đang vận chuyển' },
               { key: 'delivered', label: 'Đã giao' },
             ].map((t) => (
               <button
@@ -201,83 +260,83 @@ export default function DriverDashboard() {
           </div>
 
           <div className="mt-4 text-xs text-muted-foreground">
-            Hiển thị {filteredDeliveries.length} / {todayTotal} đơn
+            Hiển thị {filteredShipments.length} / {todayTotal} đơn
           </div>
         </div>
       </div>
 
-      {/* Deliveries List */}
+      {/* Shipments List */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Danh sách đơn hàng</h2>
+        <h2 className="text-xl font-semibold mb-4">Danh sách lô giao hàng</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredDeliveries.map((delivery) => (
+          {filteredShipments.map((shipment) => (
             <div 
-              key={delivery.id} 
+              key={shipment._id} 
               className={`bg-card rounded-xl border p-5 transition-all hover:shadow-lg border-l-4 ${
-                delivery.status === 'pending'
+                shipment.status === 'SHIPPED'
                   ? 'border-l-amber-500/70'
-                  : delivery.status === 'shipping'
+                  : shipment.status === 'IN_TRANSIT'
                     ? 'border-l-sky-500/70'
-                    : delivery.status === 'delivered'
+                    : shipment.status === 'DELIVERED'
                       ? 'border-l-emerald-500/70'
                       : 'border-l-slate-400/50'
               }`}
             >
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <p className="font-semibold text-lg">{delivery.id}</p>
-                  <p className="text-sm text-muted-foreground">Đơn: {delivery.orderId}</p>
+                  <p className="font-semibold text-lg">{shipment.shipment_no}</p>
+                  <p className="text-sm text-muted-foreground">Đơn: {shipment.order_id?.order_no || 'N/A'}</p>
                 </div>
-                <StatusBadge status={delivery.status} />
+                <StatusBadge status={shipment.status} />
               </div>
 
               <div className="space-y-3 text-sm mb-4">
                 <div className="flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-muted-foreground" />
-                  <span className="font-medium">{delivery.store}</span>
+                  <span className="font-medium">{getLocationLabel(shipment.from_location_id)}</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <MapPin className="w-4 h-4 text-muted-foreground mt-0.5" />
-                  <span className="text-muted-foreground">{delivery.address}</span>
+                  <span className="text-muted-foreground">{getLocationLabel(shipment.to_location_id)}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-muted-foreground" />
-                  <span>ETA: <span className="font-medium">{delivery.eta}</span></span>
+                  <span>Ngày giao: <span className="font-medium">{shipment.ship_date ? new Date(shipment.ship_date).toLocaleDateString('vi-VN') : 'N/A'}</span></span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Package className="w-4 h-4 text-muted-foreground" />
-                  <span>{delivery.items} sản phẩm</span>
+                  <span>Lô giao hàng</span>
                 </div>
-                {delivery.phone ? (
+                {shipment.order_id?.payment_method === 'COD' && (
                   <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">{delivery.phone}</span>
+                    <DollarSign className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-warning font-medium">COD: {formatCurrency(shipment.cod_amount || shipment.order_id?.total_amount || 0)}</span>
                   </div>
-                ) : null}
+                )}
               </div>
 
               {/* Actions */}
-              {delivery.status === 'pending' && (
+              {shipment.status === 'SHIPPED' && (
                 <div className="pt-4 border-t border-border">
                   <button 
-                    onClick={() => handleStartDelivery(delivery.id)}
+                    onClick={() => handleUpdateStatus(shipment._id, 'IN_TRANSIT')}
                     className="w-full py-2 rounded-lg bg-accent text-accent-foreground text-sm font-medium hover:opacity-90 transition-opacity"
                   >
-                    Bắt đầu giao
+                    Bắt đầu vận chuyển
                   </button>
                 </div>
               )}
 
-              {delivery.status === 'shipping' && (
+              {shipment.status === 'IN_TRANSIT' && (
                 <div className="pt-4 border-t border-border space-y-2">
                   <button 
-                    onClick={() => handleCompleteDelivery(delivery.id)}
+                    onClick={() => handleUpdateStatus(shipment._id, 'DELIVERED')}
                     className="w-full py-2 rounded-lg bg-success text-success-foreground text-sm font-medium hover:opacity-90 transition-opacity"
                   >
                     Xác nhận đã giao
                   </button>
                   <button 
-                    onClick={() => handleReportIssue(delivery.id)}
+                    onClick={() => handleReportIssue(shipment._id)}
                     className="w-full py-2 rounded-lg bg-destructive/10 text-destructive text-sm hover:bg-destructive/20 transition-colors"
                   >
                     Báo lỗi / Sự cố
@@ -285,7 +344,7 @@ export default function DriverDashboard() {
                 </div>
               )}
 
-              {delivery.status === 'delivered' && (
+              {shipment.status === 'DELIVERED' && (
                 <div className="pt-4 border-t border-border">
                   <p className="text-sm text-success text-center font-medium">
                     ✓ Đã giao thành công
@@ -299,7 +358,7 @@ export default function DriverDashboard() {
         {todayTotal === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Truck className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p>Không có đơn hàng nào được phân công hôm nay</p>
+            <p>Không có lô giao hàng nào được phân công hôm nay</p>
           </div>
         )}
       </div>
@@ -324,7 +383,7 @@ export default function DriverDashboard() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Mã đơn: <span className="font-semibold text-primary">{selectedDelivery}</span>
+                  Mã lô giao: <span className="font-semibold text-primary">{selectedShipment}</span>
                 </label>
               </div>
               

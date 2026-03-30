@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Check, RefreshCcw, Search, X } from 'lucide-react';
 import axiosInstance from '../../utils/axiosInstance';
 import { workflowService } from '../../services/workflowService';
+import { useAuth } from '../../contexts/AuthContext';
 
 const statusLabels = {
   DRAFT: 'Nháp',
@@ -40,6 +41,31 @@ const getStatusClasses = status => {
 
 export default function CentralOrdersPage() {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
+  
+  console.log('🔍 DEBUG: CentralOrdersPage render, user =', user);
+  console.log('🔍 DEBUG: authLoading =', authLoading);
+  
+  // Check if user is chef (CENTRAL_KITCHEN_STAFF role) or manager in central kitchen
+  const roleCodes = Array.isArray(user?.roles)
+    ? user.roles.map(r => String(r.code || '').toUpperCase())
+    : [];
+  const isChef = roleCodes.includes('CENTRAL_KITCHEN_STAFF');
+  const isManager = roleCodes.includes('MANAGER') && user?.org_unit_id === 'org_kitchen_hcm';
+  const canViewOrders = isChef || isManager; // Both can view orders
+  
+  console.log('🔍 DEBUG: roleCodes =', roleCodes);
+  console.log('🔍 DEBUG: isChef =', isChef);
+  console.log('🔍 DEBUG: isManager =', isManager);
+  console.log('🔍 DEBUG: canViewOrders =', canViewOrders);
+  
+  // Don't render if auth is still loading
+  if (authLoading) {
+    return <div className="flex items-center justify-center h-64">
+      <div className="text-slate-500">Đang tải...</div>
+    </div>;
+  }
+  
   const [orders, setOrders] = useState([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [shipmentFilter, setShipmentFilter] = useState('ALL'); // 'ALL' | 'NO_SHIPMENT' | 'HAS_SHIPMENT'
@@ -59,6 +85,9 @@ export default function CentralOrdersPage() {
     setLoading(true);
     setSuccess('');
     try {
+      console.log('🔍 DEBUG: isChef =', isChef);
+      console.log('🔍 DEBUG: user roles =', user?.roles);
+      
       const ordersRes = await axiosInstance.get('/internal-orders', {
         params: {
           page: pageNum,
@@ -66,14 +95,35 @@ export default function CentralOrdersPage() {
           ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
         },
       });
-      const list = Array.isArray(ordersRes.data?.data) ? ordersRes.data.data : [];
+      
+      console.log('🔍 DEBUG: API response =', ordersRes.data);
+      
+      let list = Array.isArray(ordersRes.data?.data) ? ordersRes.data.data : [];
+      console.log('🔍 DEBUG: list before filter =', list.length);
+      
+      // For Chef/Manager role: Show all orders that are ready for production (APPROVED or higher status)
+      // This includes both paid bank transfer orders and approved COD orders
+      if (canViewOrders) {
+        console.log('🔍 DEBUG: Applying Chef/Manager filter, original list =', list.map(o => ({ id: o._id, status: o.status, order_no: o.order_no })));
+        list = list.filter(order => {
+          const validStatuses = ['DRAFT', 'SUBMITTED', 'APPROVED', 'PROCESSING', 'SHIPPED', 'RECEIVED'];
+          return validStatuses.includes(order.status);
+        });
+        console.log('🔍 DEBUG: list after Chef/Manager filter =', list.length);
+        console.log('🔍 DEBUG: Filtered orders =', list.map(o => ({ id: o._id, status: o.status, order_no: o.order_no })));
+      }
+      
+      console.log('🔍 DEBUG: About to call setOrders with list.length =', list.length);
       setOrders(list);
+      console.log('🔍 DEBUG: setOrders called with list.length =', list.length);
+      console.log('🔍 DEBUG: Sample orders =', list.slice(0, 3).map(o => ({ id: o._id, order_no: o.order_no, status: o.status })));
+      
       const p = ordersRes.data?.pagination ?? {};
       setPagination({
         page: p.page ?? pageNum,
         limit: p.limit ?? PAGE_SIZE,
-        total: p.total ?? 0,
-        pages: p.pages ?? 1,
+        total: list.length, // Update total to reflect filtered count
+        pages: Math.ceil(list.length / PAGE_SIZE),
       });
       setLoading(false);
       // Tải danh sách phiếu giao (chỉ phiếu còn hiệu lực, không tính Đã hủy) để quyết định nút "Tạo phiếu giao"
@@ -114,8 +164,21 @@ export default function CentralOrdersPage() {
         }),
         workflowService.getShipmentsPaginated({ limit: 500 }),
       ]);
-      const list = Array.isArray(ordersRes.data?.data) ? ordersRes.data.data : [];
+      let list = Array.isArray(ordersRes.data?.data) ? ordersRes.data.data : [];
+      
+      // For Chef/Manager role: Show all orders that are ready for production (APPROVED or higher status)
+      if (canViewOrders) {
+        console.log('🔍 DEBUG: Applying Chef/Manager filter in loadAllForShipmentFilter, original list =', list.map(o => ({ id: o._id, status: o.status, order_no: o.order_no })));
+        list = list.filter(order => {
+          const validStatuses = ['DRAFT', 'SUBMITTED', 'APPROVED', 'PROCESSING', 'SHIPPED', 'RECEIVED'];
+          return validStatuses.includes(order.status);
+        });
+        console.log('🔍 DEBUG: Filtered orders in loadAllForShipmentFilter =', list.map(o => ({ id: o._id, status: o.status, order_no: o.order_no })));
+      }
       setOrders(list);
+      console.log('🔍 DEBUG: setOrders called in loadAllForShipmentFilter with list.length =', list.length);
+      console.log('🔍 DEBUG: setOrders called with list.length =', list.length);
+      console.log('🔍 DEBUG: Sample orders =', list.slice(0, 3).map(o => ({ id: o._id, order_no: o.order_no, status: o.status })));
       const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
       const shipList = Array.isArray(shipData) ? shipData : [];
       const ids = new Set(
@@ -134,13 +197,32 @@ export default function CentralOrdersPage() {
     }
   };
 
+  // Load data on component mount
   useEffect(() => {
-    if (shipmentFilter === 'NO_SHIPMENT' || shipmentFilter === 'HAS_SHIPMENT') {
-      loadAllForShipmentFilter();
-    } else {
+    console.log('🔍 DEBUG: Component mounted, loading orders...');
+    console.log('🔍 DEBUG: user =', user);
+    console.log('🔍 DEBUG: isChef =', isChef);
+    console.log('🔍 DEBUG: authLoading =', authLoading);
+    if (!authLoading && user) {
+      console.log('🔍 DEBUG: User available, calling loadOrders...');
       loadOrders(1);
+    } else {
+      console.log('🔍 DEBUG: User not available yet or auth loading, waiting...');
     }
-  }, [statusFilter, shipmentFilter]);
+  }, [user, canViewOrders, authLoading]);
+
+  // Load data when filters change
+  useEffect(() => {
+    console.log('🔍 DEBUG: Filters changed, reloading...');
+    console.log('🔍 DEBUG: statusFilter =', statusFilter, 'shipmentFilter =', shipmentFilter);
+    if (!authLoading && user) {
+      if (shipmentFilter === 'NO_SHIPMENT' || shipmentFilter === 'HAS_SHIPMENT') {
+        loadAllForShipmentFilter();
+      } else {
+        loadOrders(1);
+      }
+    }
+  }, [statusFilter, shipmentFilter, user, authLoading]);
 
   // Debounce search để tránh re-render bảng trên mỗi lần gõ
   useEffect(() => {
@@ -170,18 +252,36 @@ export default function CentralOrdersPage() {
         storeName.toLowerCase().includes(s)
       );
     });
+    console.log('🔍 DEBUG: After search filter, list =', list.length);
+    
     if (shipmentFilter === 'NO_SHIPMENT') {
       list = list.filter(o => o.status === 'APPROVED' && !orderIdsWithShipment.has(String(o._id)));
+      console.log('🔍 DEBUG: After NO_SHIPMENT filter, list =', list.length);
     }
-    if (shipmentFilter === 'HAS_SHIPMENT') list = list.filter(o => orderIdsWithShipment.has(String(o._id)));
+    if (shipmentFilter === 'HAS_SHIPMENT') {
+      list = list.filter(o => orderIdsWithShipment.has(String(o._id)));
+      console.log('🔍 DEBUG: After HAS_SHIPMENT filter, list =', list.length);
+    }
+    
+    console.log('🔍 DEBUG: Final filteredOrders =', list.length);
     return list;
   }, [orders, searchDebounced, shipmentFilter, orderIdsWithShipment]);
 
   const isShipmentFilterActive = shipmentFilter === 'NO_SHIPMENT' || shipmentFilter === 'HAS_SHIPMENT';
   const ordersToShow = useMemo(() => {
-    if (!isShipmentFilterActive) return filteredOrders;
+    console.log('🔍 DEBUG: ordersToShow calculation:');
+    console.log('🔍 DEBUG: isShipmentFilterActive =', isShipmentFilterActive);
+    console.log('🔍 DEBUG: filteredOrders.length =', filteredOrders.length);
+    console.log('🔍 DEBUG: pagination.page =', pagination.page);
+    
+    if (!isShipmentFilterActive) {
+      console.log('🔍 DEBUG: Returning filteredOrders directly');
+      return filteredOrders;
+    }
     const start = (pagination.page - 1) * PAGE_SIZE;
-    return filteredOrders.slice(start, start + PAGE_SIZE);
+    const result = filteredOrders.slice(start, start + PAGE_SIZE);
+    console.log('🔍 DEBUG: Returning sliced orders, start =', start, 'result.length =', result.length);
+    return result;
   }, [isShipmentFilterActive, filteredOrders, pagination.page]);
 
   useEffect(() => {
@@ -271,6 +371,67 @@ export default function CentralOrdersPage() {
       }
     } catch {
       // im lặng nếu auto tạo phiếu thất bại, tránh chặn luồng duyệt
+    }
+  };
+
+  const fixOrderStatus = async (orderId) => {
+    if (!window.confirm('Sửa trạng thái đơn hàng này về "Đang xử lý"? Thao tác này sẽ hoàn trả tồn kho nếu có phiếu giao hàng đã xuất kho bị hủy.')) {
+      return;
+    }
+
+    setActionLoadingId(orderId);
+    try {
+      const res = await workflowService.fixOrderStatusAfterCancelledShipment(orderId);
+      if (res.success) {
+        const { inventory_restored, cancelled_shipments_count } = res.data;
+        let message = 'Đã sửa trạng thái đơn hàng thành công. Đơn hàng đã được chuyển về "Đang xử lý".';
+        
+        if (inventory_restored) {
+          message += ` Đã hoàn trả tồn kho cho ${cancelled_shipments_count} phiếu giao hàng bị hủy.`;
+        }
+        
+        setSuccess(message);
+        loadOrders(pagination.page);
+      } else {
+        alert(res.message || 'Sửa trạng thái thất bại');
+      }
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Sửa trạng thái thất bại');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const restoreInventory = async (orderId) => {
+    if (!window.confirm('Hoàn trả tồn kho cho tất cả phiếu giao hàng đã xuất kho của đơn này? Thao tác này sẽ kiểm tra và hoàn trả tồn kho cho các shipment đã bị hủy hoặc có vấn đề.')) {
+      return;
+    }
+
+    setActionLoadingId(orderId);
+    try {
+      const res = await workflowService.manuallyRestoreInventoryForCancelledShipments(orderId);
+      if (res.success) {
+        const { summary, restored_shipments, already_restored_shipments, not_dispatched_shipments } = res.data;
+        
+        let message = `Đã kiểm tra và xử lý tồn kho:\n`;
+        message += `• Hoàn trả: ${summary.restored_count} phiếu giao\n`;
+        message += `• Đã hoàn trả trước đó: ${summary.already_restored_count} phiếu giao\n`;
+        message += `• Chưa xuất kho: ${summary.not_dispatched_count} phiếu giao`;
+        
+        if (summary.restored_count > 0) {
+          message += `\n\nPhiếu đã hoàn trả: ${restored_shipments.map(s => s.shipment_no).join(', ')}`;
+        }
+        
+        alert(message);
+        setSuccess(`Đã hoàn trả tồn kho cho ${summary.restored_count} phiếu giao hàng.`);
+        loadOrders(pagination.page);
+      } else {
+        alert(res.message || 'Hoàn trả tồn kho thất bại');
+      }
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Hoàn trả tồn kho thất bại');
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -420,13 +581,31 @@ export default function CentralOrdersPage() {
                   >
                     Chi tiết
                   </button>
-                  {(order.status === 'APPROVED' || order.status === 'PROCESSING') && !orderIdsWithShipment.has(String(order._id)) && (
+                  {isManager && (order.status === 'APPROVED' || order.status === 'PROCESSING') && !orderIdsWithShipment.has(String(order._id)) && (
                     <Link
                       to={`/app/central/shipments?create=1&orderId=${order._id}`}
                       className='ml-1 rounded-md border border-orange-200 px-2 py-1 text-xs text-orange-600 hover:bg-orange-50'
                     >
                       Tạo phiếu giao
                     </Link>
+                  )}
+                  {(order.status === 'SHIPPED' || order.status === 'DELIVERED') && (
+                    <button
+                      onClick={() => fixOrderStatus(order._id)}
+                      disabled={actionLoadingId === order._id}
+                      className='ml-1 rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-60'
+                    >
+                      Sửa trạng thái
+                    </button>
+                  )}
+                  {isManager && (order.status === 'PROCESSING' || order.status === 'APPROVED') && (
+                    <button
+                      onClick={() => restoreInventory(order._id)}
+                      disabled={actionLoadingId === order._id}
+                      className='ml-1 rounded-md border border-blue-200 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-60'
+                    >
+                      Hoàn trả tồn kho
+                    </button>
                   )}
                 </td>
               </tr>
@@ -522,12 +701,14 @@ export default function CentralOrdersPage() {
                 </div>
                 {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && !orderIdsWithShipment.has(String(detailOrder._id)) && (
                   <div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4'>
-                    <Link
-                      to={`/app/central/shipments?create=1&orderId=${detailOrder._id}`}
-                      className='rounded-lg border border-orange-200 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50'
-                    >
-                      Tạo phiếu giao hàng
-                    </Link>
+                    {isManager && (
+                      <Link
+                        to={`/app/central/shipments?create=1&orderId=${detailOrder._id}`}
+                        className='rounded-lg border border-orange-200 px-4 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50'
+                      >
+                        Tạo phiếu giao hàng
+                      </Link>
+                    )}
                   </div>
                 )}
                 {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && orderIdsWithShipment.has(String(detailOrder._id)) && (

@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import StatusBadge from '../../components/ui/StatusBadges';
+import LocationMapPicker from '../../components/ui/LocationMapPicker';
 import { workflowService } from '../../services/workflowService';
 
 const getRows = data => {
@@ -71,6 +72,8 @@ export default function AdminStoresPage() {
     district: '',
     city: '',
     status: 'ACTIVE',
+    latitude: '',
+    longitude: ''
   });
 
   const [locations, setLocations] = useState([]);
@@ -151,6 +154,8 @@ export default function AdminStoresPage() {
           district: d.district || '',
           city: d.city || '',
           status: (d.status || 'ACTIVE').toUpperCase(),
+          latitude: d.coordinates?.latitude?.toString() || '',
+          longitude: d.coordinates?.longitude?.toString() || '',
         });
       }
       if (!cancelled) setEditOrgLoading(false);
@@ -529,6 +534,11 @@ export default function AdminStoresPage() {
                   e.preventDefault();
                   if (!editingOrgId) return;
                   setError('');
+                  const coordinates = orgForm.latitude && orgForm.longitude ? {
+                    latitude: parseFloat(orgForm.latitude),
+                    longitude: parseFloat(orgForm.longitude)
+                  } : null;
+
                   const payload = {
                     code: orgForm.code.trim() || undefined,
                     name: orgForm.name.trim(),
@@ -542,9 +552,14 @@ export default function AdminStoresPage() {
                     setError(res.message || 'Không thể cập nhật đơn vị');
                     return;
                   }
+                  
+                  if (coordinates) {
+                    await workflowService.updateOrgUnitCoordinates(editingOrgId, coordinates);
+                  }
+
                   setShowEditOrg(false);
                   setEditingOrgId(null);
-                  setSuccess('Cập nhật đơn vị thành công.');
+                  setSuccess('Cập nhật đơn vị và tọa độ thành công.');
                   loadStores();
                   loadOrgUnits();
                 }}
@@ -604,6 +619,22 @@ export default function AdminStoresPage() {
                     </div>
                   </div>
                 </div>
+                
+                <div className='col-span-1 sm:col-span-2 pt-2'>
+                  <label className='block text-sm font-medium text-slate-700 mb-1'>Vị trí trên bản đồ</label>
+                  <p className='text-xs text-slate-500 mb-2'>Bấm vào bản đồ để chọn hoặc cập nhật tọa độ</p>
+                  <LocationMapPicker 
+                    latitude={orgForm.latitude} 
+                    longitude={orgForm.longitude} 
+                    onChange={(lat, lng) => setOrgForm(f => ({ ...f, latitude: lat.toString(), longitude: lng.toString() }))}
+                    height="200px" 
+                  />
+                  <div className='flex justify-between text-xs text-slate-500 mt-1 px-1'>
+                    <span>Vĩ độ: {orgForm.latitude ? parseFloat(orgForm.latitude).toFixed(6) : '-'}</span>
+                    <span>Kinh độ: {orgForm.longitude ? parseFloat(orgForm.longitude).toFixed(6) : '-'}</span>
+                  </div>
+                </div>
+
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Loại</label>
                   <input
@@ -670,6 +701,11 @@ export default function AdminStoresPage() {
               onSubmit={async e => {
                 e.preventDefault();
                 setError('');
+                const coordinates = orgForm.latitude && orgForm.longitude ? {
+                  latitude: parseFloat(orgForm.latitude),
+                  longitude: parseFloat(orgForm.longitude)
+                } : null;
+
                 const payload = {
                   name: orgForm.name.trim(),
                   code: orgForm.code.trim() || undefined,
@@ -684,9 +720,14 @@ export default function AdminStoresPage() {
                   setError(res.message || 'Không thể tạo đơn vị');
                   return;
                 }
-                setOrgForm({ name: '', code: '', type: 'STORE', address: '', district: '', city: '', status: 'ACTIVE' });
+                
+                if (coordinates && res.data && res.data._id) {
+                  await workflowService.updateOrgUnitCoordinates(res.data._id, coordinates);
+                }
+
+                setOrgForm({ name: '', code: '', type: 'STORE', address: '', district: '', city: '', status: 'ACTIVE', latitude: '', longitude: '' });
                 setShowCreateOrg(false);
-                setSuccess('Tạo đơn vị / cửa hàng mới thành công.');
+                setSuccess('Tạo đơn vị mới và tọa độ thành công.');
                 loadStores();
                 loadOrgUnits();
               }}
@@ -746,6 +787,22 @@ export default function AdminStoresPage() {
                   </div>
                 </div>
               </div>
+
+              <div className='col-span-1 pt-2'>
+                <label className='block text-sm font-medium text-slate-700 mb-1'>Vị trí trên bản đồ</label>
+                <p className='text-xs text-slate-500 mb-2'>Bấm vào bản đồ để chọn tọa độ</p>
+                <LocationMapPicker 
+                  latitude={orgForm.latitude} 
+                  longitude={orgForm.longitude} 
+                  onChange={(lat, lng) => setOrgForm(f => ({ ...f, latitude: lat.toString(), longitude: lng.toString() }))}
+                  height="200px" 
+                />
+                <div className='flex justify-between text-xs text-slate-500 mt-1 px-1'>
+                  <span>Vĩ độ: {orgForm.latitude ? parseFloat(orgForm.latitude).toFixed(6) : '-'}</span>
+                  <span>Kinh độ: {orgForm.longitude ? parseFloat(orgForm.longitude).toFixed(6) : '-'}</span>
+                </div>
+              </div>
+
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <div>
                   <label className='block text-sm font-medium text-slate-700'>Loại</label>

@@ -21,17 +21,41 @@ axiosInstance.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Logging request details
+    console.log('=== Axios Request ===');
+    console.log('Method:', config.method?.toUpperCase());
+    console.log('URL:', config.baseURL + config.url);
+    console.log('Headers:', config.headers);
+    console.log('Data:', config.data);
+    console.log('Params:', config.params);
+    
     return config;
   },
   error => {
+    console.error('Axios Request Error:', error);
     return Promise.reject(error);
   }
 );
 
 // Response interceptor để handle token refresh
 axiosInstance.interceptors.response.use(
-  response => response,
+  response => {
+    // Logging successful response
+    console.log('=== Axios Response ===');
+    console.log('Status:', response.status);
+    console.log('URL:', response.config.url);
+    console.log('Response data:', response.data);
+    
+    return response;
+  },
   async error => {
+    console.error('=== Axios Error ===');
+    console.error('Error config:', error.config);
+    console.error('Error status:', error.response?.status);
+    console.error('Error data:', error.response?.data);
+    console.error('Error message:', error.message);
+    
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {

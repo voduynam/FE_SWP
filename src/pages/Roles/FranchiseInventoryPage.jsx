@@ -27,7 +27,9 @@ const severityLabel = { EXPIRED: 'Hết hạn', CRITICAL: '< 3 ngày', HIGH: '3-
 const EXPIRY_DAYS_THRESHOLD = 14;
 
 const getItemName = v => { if (!v) return '-'; if (typeof v === 'object') return v.name || v.sku || v._id || '-'; return v; };
+const getItemSku = v => { if (!v) return '-'; if (typeof v === 'object') return v.sku || v._id || '-'; return v; };
 const getLocName = v => { if (!v) return '-'; if (typeof v === 'object') return v.name || v.code || v._id || '-'; return v; };
+const getLocCode = v => { if (!v) return '-'; if (typeof v === 'object') return v.code || v.name || v._id || '-'; return v; };
 const getLotCode = v => { if (!v) return '-'; if (typeof v === 'object') return v.lot_code || v._id || '-'; return v; };
 const getAlertItemName = r => r?.item?.name || r?.item_name || getItemName(r?.item_id) || '-';
 
@@ -64,54 +66,58 @@ export default function FranchiseInventoryPage() {
   const [expandedGroupKeys, setExpandedGroupKeys] = useState({});
   const [balPag, setBalPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [balSearch, setBalSearch] = useState('');
+  const [debouncedBalSearch, setDebouncedBalSearch] = useState('');
   const [hideZero, setHideZero] = useState(true);
 
   // Product type filter (theo item_type)
   const [itemTypeFilter, setItemTypeFilter] = useState('ALL');
-  const [itemTypes, setItemTypes] = useState([]); // [{ _id, name }]
+  const itemTypes = [{ _id: 'FINISHED', name: 'Thành phẩm' }, { _id: 'RAW', name: 'Nguyên liệu' }];
 
   // Transactions
   const [txns, setTxns] = useState([]);
   const [txnPag, setTxnPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [txnTypeFilter, setTxnTypeFilter] = useState('');
   const [txnSearch, setTxnSearch] = useState('');
+  const [debouncedTxnSearch, setDebouncedTxnSearch] = useState('');
+
+  // Debounce searches
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedBalSearch(balSearch), 500);
+    return () => clearTimeout(timer);
+  }, [balSearch]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedTxnSearch(txnSearch), 500);
+    return () => clearTimeout(timer);
+  }, [txnSearch]);
 
   // Alerts
   const [lowStockAlerts, setLowStockAlerts] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState([]);
 
+  // Issue inventory modal
+  const [issueModal, setIssueModal] = useState({ open: false, item: null });
+  const [issueData, setIssueData] = useState({ qty: 0, reason: '' });
+
   const loadBalances = async (page = 1) => {
     setLoading(true); setError('');
     try {
-      // Fetch full rows so we can group by (location,item) without being split by BE pagination.
-      const allRows = [];
-      const limit = 200;
-      let curPage = 1;
-      let totalPages = 1;
+      const params = { page, limit: PAGE_SIZE };
+      if (debouncedBalSearch) params.search = debouncedBalSearch;
 
-      while (curPage <= totalPages) {
-        const res = await workflowService.getInventoryBalancesPaginated({ page: curPage, limit });
-        if (!res.success) {
-          setError(res.message || 'Không tải được tồn kho');
-          setBalances([]);
-          return;
-        }
-
-        const rows = Array.isArray(res.data?.data)
-          ? res.data.data
-          : Array.isArray(res.data)
-            ? res.data
-            : [];
-        allRows.push(...rows);
-
-        const p = res.data?.pagination ?? {};
-        totalPages = p.pages || curPage;
-        curPage++;
+      const res = await workflowService.getInventoryBalancesGrouped(params);
+      if (!res.success) {
+        setError(res.message || 'Không tải được tồn kho');
+        setBalances([]);
+        return;
       }
 
-      setBalances(allRows);
+      const rows = Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
+      setBalances(rows);
       setExpandedGroupKeys({});
-      setBalPag(prev => ({ ...prev, page }));
+      
+      const p = res.data?.pagination ?? {};
+      setBalPag({ page: p.page || page, limit: p.limit || PAGE_SIZE, total: p.total || rows.length, pages: p.pages || 1 });
     } finally { setLoading(false); }
   };
 
@@ -120,6 +126,7 @@ export default function FranchiseInventoryPage() {
     try {
       const params = { page, limit: PAGE_SIZE };
       if (txnTypeFilter) params.txn_type = txnTypeFilter;
+      if (debouncedTxnSearch) params.search = debouncedTxnSearch;
       const res = await workflowService.getInventoryTransactions(params);
       if (res.success && res.data) {
         const list = Array.isArray(res.data.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
@@ -146,112 +153,82 @@ export default function FranchiseInventoryPage() {
   };
 
   useEffect(() => { loadBalances(1); loadAlerts(); }, []);
-  useEffect(() => { if (tab === 'transactions') loadTxns(1); }, [tab, txnTypeFilter]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadBalances(1); }, [debouncedBalSearch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === 'transactions') loadTxns(1); }, [tab, txnTypeFilter, debouncedTxnSearch]);
 
-  const groupedBalances = useMemo(() => {
-    const map = new Map();
-
-    for (const row of balances) {
-      const locId = row.location_id?._id ?? row.location_id ?? '';
-      const itemId = row.item_id?._id ?? row.item_id ?? '';
-      const key = `${locId}__${itemId}`;
-
-      if (hideZero && (row.qty_on_hand ?? 0) === 0) continue;
-
-      if (!map.has(key)) {
-        map.set(key, {
-          key,
-          location_id: row.location_id,
-          item_id: row.item_id,
-          item_type_id: row.item_id?.item_type?._id ?? row.item_id?.item_type ?? null,
-          item_type_name: row.item_id?.item_type?.name ?? null,
-          qty_on_hand: 0,
-          qty_reserved: 0,
-          qty_available: 0,
-          lots: [],
-        });
-      }
-
-      const g = map.get(key);
-      g.qty_on_hand += row.qty_on_hand ?? 0;
-      g.qty_reserved += row.qty_reserved ?? 0;
-      g.qty_available += getQtyAvailable(row);
-      g.lots.push(row);
-    }
-
-    const groups = Array.from(map.values()).map(g => {
-      g.lots.sort((a, b) => {
-        const ad = a.lot_id?.mfg_date ? new Date(a.lot_id.mfg_date).getTime() : Infinity;
-        const bd = b.lot_id?.mfg_date ? new Date(b.lot_id.mfg_date).getTime() : Infinity;
-        return ad - bd;
-      });
-      return g;
-    });
-
-    groups.sort((a, b) => {
-      const la = getLocName(a.location_id).toLowerCase();
-      const lb = getLocName(b.location_id).toLowerCase();
-      if (la !== lb) return la.localeCompare(lb);
-      return getItemName(a.item_id).toLowerCase().localeCompare(getItemName(b.item_id).toLowerCase());
-    });
-
-    return groups.filter(g => !(hideZero && (g.qty_on_hand ?? 0) === 0));
-  }, [balances, hideZero]);
-
-  useEffect(() => {
-    // Build item type dropdown based on what exists in balances.
-    const map = new Map();
-    for (const row of balances) {
-      const t = row.item_id?.item_type;
-      const id = t?._id ?? t ?? null;
-      const name = t?.name ?? null;
-      if (!id || !name) continue;
-      if (!map.has(id)) map.set(id, { _id: id, name });
-    }
-    const list = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-    setItemTypes(list);
-
-    // If no filter selected yet, pick the first type to reduce clutter.
-    if (itemTypeFilter === 'ALL' && list.length > 0) {
-      setItemTypeFilter(list[0]._id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [balances]);
-
-  const filteredGroups = useMemo(() => {
-    let list = groupedBalances;
-
-    if (itemTypeFilter !== 'ALL') {
-      list = list.filter(g => String(g.item_type_id ?? '') === String(itemTypeFilter));
-    }
-
-    const s = (balSearch || '').toLowerCase().trim();
-    if (!s) return list;
-
-    return list.filter(g => {
-      const itemName = getItemName(g.item_id).toLowerCase();
-      const loc = getLocName(g.location_id).toLowerCase();
-      return itemName.includes(s) || loc.includes(s);
-    });
-  }, [groupedBalances, itemTypeFilter, balSearch]);
-
-  const groupPages = Math.max(1, Math.ceil(filteredGroups.length / PAGE_SIZE));
-  const currentGroupPage = Math.min(balPag.page, groupPages);
   const pagedGroups = useMemo(() => {
-    const start = (currentGroupPage - 1) * PAGE_SIZE;
-    return filteredGroups.slice(start, start + PAGE_SIZE);
-  }, [filteredGroups, currentGroupPage]);
+    let list = balances;
+    if (itemTypeFilter !== 'ALL') {
+      list = list.filter(g => String(g.item_id?.item_type ?? '') === String(itemTypeFilter));
+    }
+    if (hideZero) {
+      list = list.filter(g => (g.qty_on_hand ?? 0) !== 0);
+    }
+    return list;
+  }, [balances, itemTypeFilter, hideZero]);
 
-  const filteredTxns = useMemo(() => {
-    const s = (txnSearch || '').toLowerCase();
-    if (!s) return txns;
-    return txns.filter(t => getItemName(t.item_id).toLowerCase().includes(s) || getLocName(t.location_id).toLowerCase().includes(s) || (t.notes || '').toLowerCase().includes(s));
-  }, [txns, txnSearch]);
+  const groupPages = balPag.pages;
+  const currentGroupPage = balPag.page;
+
+  const filteredTxns = txns;
 
   const handleRefresh = () => {
     if (tab === 'balances') loadBalances(balPag.page);
     else if (tab === 'transactions') loadTxns(txnPag.page);
     else loadAlerts();
+  };
+
+  const handleIssueInventory = (item) => {
+    // Ensure we have the right data structure
+    const itemData = {
+      ...item,
+      item: typeof item.item === 'object' ? item.item : null,
+      location: typeof item.location === 'object' ? item.location : null
+    };
+    setIssueModal({ open: true, item: itemData });
+    setIssueData({ qty: 0, reason: '' });
+  };
+
+  const confirmIssueInventory = async () => {
+    if (!issueModal.item || !issueData.qty || issueData.qty <= 0) {
+      alert('Vui lòng nhập số lượng hợp lệ');
+      return;
+    }
+
+    if (issueData.qty > (issueModal.item.qty_on_hand || 0)) {
+      alert('Số lượng lấy không được vượt quá tồn kho');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const adjustmentData = {
+        location_id: issueModal.item.location?._id || issueModal.item._id?.location_id,
+        item_id: issueModal.item.item?._id || issueModal.item._id?.item_id,
+        adjustment_type: 'ISSUE',
+        qty_adjustment: -Math.abs(issueData.qty), // Negative for issue
+        reason: issueData.reason || 'Staff lấy hàng bán',
+        notes: `Staff issue: ${issueData.reason || 'Bán hàng'}`
+      };
+
+      const res = await workflowService.adjustInventory(adjustmentData);
+      
+      if (res.success) {
+        alert('Đã lấy hàng thành công');
+        setIssueModal({ open: false, item: null });
+        setIssueData({ qty: 0, reason: '' });
+        loadBalances(balPag.page);
+      } else {
+        alert(res.message || 'Lỗi khi lấy hàng');
+      }
+    } catch (error) {
+      console.error('Error issuing inventory:', error);
+      alert('Lỗi khi lấy hàng');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const tabs = [
@@ -329,7 +306,7 @@ export default function FranchiseInventoryPage() {
                   <th className='px-4 py-3 font-medium text-slate-600'>Vị trí</th>
                   <th className='px-4 py-3 font-medium text-slate-600'>Lô</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Tồn kho</th>
-                  <th className='px-4 py-3 font-medium text-slate-600 text-right'>Đặt trước</th>
+                  <th className='px-4 py-3 font-medium text-slate-600 text-right'>Giá trị</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Khả dụng</th>
                 </tr>
               </thead>
@@ -349,8 +326,9 @@ export default function FranchiseInventoryPage() {
                 {!loading &&
                   pagedGroups.map(g => {
                     const qty = g.qty_on_hand ?? 0;
-                    const reserved = g.qty_reserved ?? 0;
-                    const avail = g.qty_available ?? (qty - reserved);
+                    const itemCostPrice = typeof g.item_id === 'object' ? (g.item_id.cost_price || 0) : 0;
+                    const totalValue = qty * itemCostPrice;
+                    const avail = g.qty_available ?? qty;
                     const isNegative = qty < 0;
                     const expanded = !!expandedGroupKeys[g.key];
 
@@ -364,8 +342,18 @@ export default function FranchiseInventoryPage() {
                     return (
                       <Fragment key={g.key}>
                         <tr className={`hover:bg-slate-50/50 ${isNegative ? 'bg-red-50/50' : ''}`}>
-                          <td className='px-4 py-3 font-medium text-slate-900'>{getItemName(g.item_id)}</td>
-                          <td className='px-4 py-3 text-slate-700'>{getLocName(g.location_id)}</td>
+                          <td className='px-4 py-3 font-medium text-slate-900'>
+                            <div>
+                              <div className="font-medium">{g.item?.name || getItemName(g.item_id)}</div>
+                              <div className="text-xs text-slate-500">{g.item?.sku || getItemSku(g.item_id)}</div>
+                            </div>
+                          </td>
+                          <td className='px-4 py-3 text-slate-700'>
+                            <div>
+                              <div>{g.location?.name || getLocName(g.location_id)}</div>
+                              <div className="text-xs text-slate-500">{g.location?.code || getLocCode(g.location_id)}</div>
+                            </div>
+                          </td>
                           <td className='px-4 py-3 text-slate-500 text-xs'>
                             <button
                               type='button'
@@ -381,8 +369,23 @@ export default function FranchiseInventoryPage() {
                               )}
                             </button>
                           </td>
-                          <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>{qty}</td>
-                          <td className='px-4 py-3 text-right text-slate-500'>{reserved}</td>
+                          <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>
+                            <div className="flex items-center justify-end gap-2">
+                              <span>{qty}</span>
+                              {qty > 0 && (
+                                <button
+                                  onClick={() => handleIssueInventory(g)}
+                                  className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded"
+                                  title="Lấy hàng (Issue)"
+                                >
+                                  Lấy
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className='px-4 py-3 text-right text-slate-700'>
+                            {totalValue > 0 ? `${totalValue.toLocaleString('vi-VN')} ₫` : '-'}
+                          </td>
                           <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{avail}</td>
                         </tr>
 
@@ -404,7 +407,7 @@ export default function FranchiseInventoryPage() {
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600'>Ngày hết hạn</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600'>Tình trạng</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Tồn</th>
-                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Đặt trước</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Giá trị</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Khả dụng</th>
                                       </tr>
                                     </thead>
@@ -452,7 +455,14 @@ export default function FranchiseInventoryPage() {
                                               )}
                                             </td>
                                             <td className='px-2 py-2 text-right text-xs font-medium text-slate-900'>{l.qty_on_hand ?? 0}</td>
-                                            <td className='px-2 py-2 text-right text-xs text-slate-600'>{l.qty_reserved ?? 0}</td>
+                                            <td className='px-2 py-2 text-right text-xs text-slate-600'>
+                                              {(() => {
+                                                const lotQty = l.qty_on_hand ?? 0;
+                                                const lotCostPrice = typeof g.item_id === 'object' ? (g.item_id.cost_price || 0) : 0;
+                                                const lotValue = lotQty * lotCostPrice;
+                                                return lotValue > 0 ? `${lotValue.toLocaleString('vi-VN')} ₫` : '-';
+                                              })()}
+                                            </td>
                                             <td className='px-2 py-2 text-right text-xs font-semibold text-emerald-600'>{getQtyAvailable(l)}</td>
                                           </tr>
                                         );
@@ -473,18 +483,18 @@ export default function FranchiseInventoryPage() {
 
           {groupPages > 1 && (
             <div className='flex items-center justify-between text-sm text-slate-500'>
-              <span>Trang {currentGroupPage}/{groupPages} ({filteredGroups.length} nhóm sản phẩm)</span>
+              <span>Trang {currentGroupPage}/{groupPages} ({balPag.total} nhóm sản phẩm)</span>
               <div className='flex gap-1'>
                 <button
                   disabled={currentGroupPage <= 1}
-                  onClick={() => setBalPag(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+                  onClick={() => loadBalances(Math.max(1, currentGroupPage - 1))}
                   className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'
                 >
                   Trước
                 </button>
                 <button
                   disabled={currentGroupPage >= groupPages}
-                  onClick={() => setBalPag(prev => ({ ...prev, page: Math.min(groupPages, prev.page + 1) }))}
+                  onClick={() => loadBalances(Math.min(groupPages, currentGroupPage + 1))}
                   className='rounded-md border px-3 py-1 hover:bg-slate-50 disabled:opacity-40'
                 >
                   Sau
@@ -592,6 +602,76 @@ export default function FranchiseInventoryPage() {
                   </p>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Issue Inventory Modal */}
+      {issueModal.open && issueModal.item && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96 max-w-90vw">
+            <h3 className="text-lg font-semibold mb-4">Lấy Hàng Từ Kho</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sản phẩm</label>
+                <div className="text-sm text-gray-900">
+                  <div className="font-medium">
+                    {getItemName(issueModal.item?.item)}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    SKU: {getItemSku(issueModal.item?.item)}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Vị trí: {getLocName(issueModal.item?.location)}
+                  </div>
+                  <div className="text-xs text-gray-500">Tồn kho: {issueModal.item?.qty_on_hand || 0}</div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Số lượng lấy <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={issueModal.item?.qty_on_hand || 0}
+                  value={issueData.qty}
+                  onChange={(e) => setIssueData(prev => ({ ...prev, qty: parseInt(e.target.value) || 0 }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Nhập số lượng"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Lý do</label>
+                <input
+                  type="text"
+                  value={issueData.reason}
+                  onChange={(e) => setIssueData(prev => ({ ...prev, reason: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Ví dụ: Bán hàng, Khuyến mãi..."
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setIssueModal({ open: false, item: null })}
+                className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                disabled={loading}
+              >
+                Hủy
+              </button>
+              <button
+                onClick={confirmIssueInventory}
+                className="flex-1 px-4 py-2 text-white bg-red-600 rounded-md hover:bg-red-700"
+                disabled={loading || !issueData.qty}
+              >
+                {loading ? 'Đang xử lý...' : 'Lấy Hàng'}
+              </button>
             </div>
           </div>
         </div>

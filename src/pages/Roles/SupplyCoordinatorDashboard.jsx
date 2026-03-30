@@ -108,15 +108,15 @@ export default function SupplyCoordinatorDashboard() {
     setError('');
 
     try {
-      const [cRes, eRes, rRes, sRes] = await Promise.all([
-        workflowService.getConsolidatedOrders({ delivery_date: date, page: 1, limit: 20 }),
+      const [eRes, rRes, sRes] = await Promise.all([
+        // workflowService.getConsolidatedOrders({ delivery_date: date, page: 1, limit: 20 }), // DISABLED
         workflowService.getExceptions({ page: 1, limit: 50 }),
         workflowService.getDeliveryRoutes({ page: 1, limit: 20 }),
         workflowService.getShipments({ page: 1, limit: 20 }),
       ]);
 
-      if (!cRes.success) setConsolidated([]);
-      else setConsolidated(getRows(cRes.data));
+      // Tắt tính năng tổng hợp đơn
+      setConsolidated([]);
 
       if (!eRes.success) setExceptions([]);
       else setExceptions(getRows(eRes.data));
@@ -238,8 +238,8 @@ export default function SupplyCoordinatorDashboard() {
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-4">
-        <StatCard title="Consolidated (today)" value={`${consolidated.length}`} icon={ClipboardList} color="primary" />
-        <StatCard title="Cần sản xuất" value={`${consolidatedNeedProductionCount}`} icon={AlertCircle} color="warning" />
+        <StatCard title="Tổng hợp đơn (tắt)" value="0" icon={ClipboardList} color="muted" />
+        <StatCard title="Cần sản xuất (tắt)" value="0" icon={AlertCircle} color="muted" />
         <StatCard title="Sự cố mở" value={`${openExceptions.length}`} icon={AlertTriangle} color="destructive" />
         <StatCard title="Đang vận hành" value={`${inProgressRoutesCount}`} icon={Truck} color="accent" />
       </div>
@@ -305,38 +305,13 @@ export default function SupplyCoordinatorDashboard() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-1 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent ring-1 ring-emerald-500/10">
+        <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-1 bg-gradient-to-br from-slate-500/10 via-transparent to-transparent ring-1 ring-slate-500/10">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold">Cần sản xuất (top)</h2>
-            <span className="text-xs text-muted-foreground">{needProductionRows.length}</span>
+            <h2 className="text-base font-semibold">Tổng hợp đơn (đã tắt)</h2>
+            <span className="text-xs text-muted-foreground">0</span>
           </div>
 
-          {!needProductionRows.length ? (
-            <p className="text-sm text-muted-foreground py-5">Không có nhu cầu cần sản xuất.</p>
-          ) : (
-            <div className="space-y-2">
-              {needProductionRows.map((row) => (
-                <div key={row._id} className="rounded-lg bg-muted/40 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-medium text-slate-900 truncate">{getItemName(row.item_name || row.item_id)}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Nhu cầu: {row.need_to_produce ?? 0} · Tồn: {row.available_inventory ?? 0}
-                      </div>
-                    </div>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${getProductionStatusPillClass(row.production_status)}`}
-                    >
-                      {PROD_STATUS_LABELS[row.production_status] || row.production_status || '-'}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    Số cửa hàng: {(row.stores || []).length}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <p className="text-sm text-muted-foreground py-5">Tính năng tổng hợp đơn đã được tắt.</p>
         </div>
 
         <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-2">

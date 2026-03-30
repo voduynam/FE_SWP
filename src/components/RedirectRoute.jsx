@@ -2,7 +2,7 @@ import { useContext } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContext';
 
-const RedirectRoute = () => {
+const RedirectRoute = ({ children }) => {
   const { isAuthenticated, loading } = useContext(AuthContext);
 
   // Show loading while checking authentication
@@ -17,12 +17,13 @@ const RedirectRoute = () => {
     );
   }
 
-  // Redirect to login if not authenticated, otherwise to dashboard
-  if (!isAuthenticated) {
-    return <Navigate to='/login' replace />;
+  // If authenticated, redirect to dashboard (which will redirect to role-specific dashboard)
+  if (isAuthenticated) {
+    return <Navigate to='/app/dashboard' replace />;
   }
 
-  return <Navigate to='/app/dashboard' replace />;
+  // If not authenticated, render children (Login page)
+  return children;
 };
 
 export default RedirectRoute;

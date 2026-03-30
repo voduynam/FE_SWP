@@ -38,6 +38,11 @@ export default function AlertsBadge() {
     ? user.roles.map(r => String(r.code || '').trim().toUpperCase())
     : [];
 
+  // Hide alerts badge for drivers - they don't have inventory alerts
+  if (roleCodes.includes('DRIVER')) {
+    return null;
+  }
+
   // Alerts are shown by each inventory page (expiry + low-stock),
   // so badge should navigate to the appropriate inventory screen.
   const targetPath = (() => {

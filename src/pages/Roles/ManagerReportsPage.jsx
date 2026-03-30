@@ -34,7 +34,7 @@ export default function ManagerReportsPage() {
     try {
       const [overviewRes, perfRes, profitRes] = await Promise.all([
         workflowService.getDashboardOverview({}),
-        workflowService.getPerformanceDashboard({}),
+        workflowService.getPerformanceDashboardData({}),
         workflowService.getDashboardProfit({}),
       ]);
 

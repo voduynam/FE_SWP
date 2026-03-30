@@ -76,7 +76,17 @@ export const DeliveryProvider = ({ children }) => {
       return;
     }
 
-    // Chỉ fetch khi đã có user
+    // Chỉ fetch delivery routes cho các role có quyền
+    const userRole = user?.roleId?.roleName || user?.role || '';
+    const allowedRoles = ['driver', 'supply_coordinator', 'manager', 'admin'];
+    
+    if (!allowedRoles.includes(userRole.toLowerCase())) {
+      setDeliveries([]);
+      setLoading(false);
+      return;
+    }
+
+    // Chỉ fetch khi đã có user và role phù hợp
     fetchDeliveries(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user?.id]);
@@ -85,12 +95,20 @@ export const DeliveryProvider = ({ children }) => {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    // Chỉ auto refresh cho các role có quyền
+    const userRole = user?.roleId?.roleName || user?.role || '';
+    const allowedRoles = ['driver', 'supply_coordinator', 'manager', 'admin'];
+    
+    if (!allowedRoles.includes(userRole.toLowerCase())) {
+      return;
+    }
+
     const interval = setInterval(() => {
       fetchDeliveries(false);
     }, 60000); // Refresh mỗi 60s
 
     return () => clearInterval(interval);
-  }, [isAuthenticated, fetchDeliveries]);
+  }, [isAuthenticated, fetchDeliveries, user?.role]);
 
   // Cập nhật trạng thái delivery
   const updateDeliveryStatus = useCallback(async (deliveryId, newStatus) => {

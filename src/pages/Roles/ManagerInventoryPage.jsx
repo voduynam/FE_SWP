@@ -103,12 +103,16 @@ export default function ManagerInventoryPage() {
   // Balances
   const [balances, setBalances] = useState([]);
   const [locationFilter, setLocationFilter] = useState('ALL');
+  const [expiryFilter, setExpiryFilter] = useState('ALL');
   const [filterLocations, setFilterLocations] = useState([]);
   const [locationsLoading, setLocationsLoading] = useState(false);
   const [expandedGroupKeys, setExpandedGroupKeys] = useState({});
   const [balPag, setBalPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [balSearch, setBalSearch] = useState('');
   const [hideZero, setHideZero] = useState(true);
+
+  // Disposal
+  const [disposing, setDisposing] = useState(false);
 
   // Transactions
   const [txns, setTxns] = useState([]);
@@ -264,6 +268,15 @@ export default function ManagerInventoryPage() {
     loadSummary();
     loadFilterLocations();
     loadAlerts();
+    // Load items for disposal functionality
+    const loadItems = async () => {
+      const res = await workflowService.getItems({ limit: 500 });
+      if (res.success) {
+        const itemList = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.data) ? res.data.data : [];
+        setItems(itemList);
+      }
+    };
+    loadItems();
   }, []);
 
   // Reload balances when location filter changes.
@@ -292,7 +305,6 @@ export default function ManagerInventoryPage() {
           location_id: row.location_id,
           item_id: row.item_id,
           qty_on_hand: 0,
-          qty_reserved: 0,
           qty_available: 0,
           lots: [],
         });
@@ -300,7 +312,6 @@ export default function ManagerInventoryPage() {
 
       const g = map.get(key);
       g.qty_on_hand += row.qty_on_hand ?? 0;
-      g.qty_reserved += row.qty_reserved ?? 0;
       g.qty_available += getQtyAvailable(row);
       g.lots.push(row);
     }
@@ -329,16 +340,53 @@ export default function ManagerInventoryPage() {
 
   const filteredGroups = useMemo(() => {
     const s = (balSearch || '').toLowerCase().trim();
-    if (!s) return groupedBalances;
-
-    return groupedBalances.filter(g => {
-      const itemObj = g.item_id;
-      const itemName = getItemName(itemObj).toLowerCase();
-      const sku = typeof itemObj === 'object' ? String(itemObj.sku || '').toLowerCase() : '';
-      const loc = getLocName(g.location_id).toLowerCase();
-      return itemName.includes(s) || sku.includes(s) || loc.includes(s);
-    });
-  }, [groupedBalances, balSearch]);
+    
+    let filtered = groupedBalances;
+    
+    // Apply search filter
+    if (s) {
+      filtered = filtered.filter(g => {
+        const itemObj = g.item_id;
+        const itemName = getItemName(itemObj).toLowerCase();
+        const sku = typeof itemObj === 'object' ? String(itemObj.sku || '').toLowerCase() : '';
+        const loc = getLocName(g.location_id).toLowerCase();
+        return itemName.includes(s) || sku.includes(s) || loc.includes(s);
+      });
+    }
+    
+    // Apply expiry filter
+    if (expiryFilter !== 'ALL') {
+      filtered = filtered.filter(g => {
+        const hasExpiredLots = g.lots.some(l => {
+          const status = getLotExpiryStatus(l);
+          return status && status.severity === 'EXPIRED';
+        });
+        
+        const hasExpiringSoonLots = g.lots.some(l => {
+          const status = getLotExpiryStatus(l);
+          return status && ['CRITICAL', 'HIGH', 'MEDIUM'].includes(status.severity);
+        });
+        
+        const hasNormalLots = g.lots.some(l => {
+          const status = getLotExpiryStatus(l);
+          return !status; // No expiry warning
+        });
+        
+        switch (expiryFilter) {
+          case 'EXPIRED':
+            return hasExpiredLots;
+          case 'EXPIRING_SOON':
+            return hasExpiringSoonLots && !hasExpiredLots;
+          case 'NORMAL':
+            return hasNormalLots && !hasExpiredLots && !hasExpiringSoonLots;
+          default:
+            return true;
+        }
+      });
+    }
+    
+    return filtered;
+  }, [groupedBalances, balSearch, expiryFilter]);
 
   const showLocationColumn = locationFilter === 'ALL';
   const balanceTableColSpan = showLocationColumn ? 7 : 6;
@@ -353,18 +401,57 @@ export default function ManagerInventoryPage() {
   useEffect(() => {
     // Keep pagination consistent when searching/filtering.
     setBalPag(prev => ({ ...prev, page: 1 }));
-  }, [balSearch, hideZero]);
+  }, [balSearch, hideZero, expiryFilter]);
 
-  const filteredTxns = useMemo(() => {
-    const s = (txnSearch || '').toLowerCase();
-    if (!s) return txns;
-    return txns.filter(t => {
-      const name = getItemName(t.item_id).toLowerCase();
-      const loc = getLocName(t.location_id).toLowerCase();
-      const notes = (t.notes || '').toLowerCase();
-      return name.includes(s) || loc.includes(s) || notes.includes(s);
-    });
-  }, [txns, txnSearch]);
+  /* ── Disposal ── */
+  const handleDisposal = async (locationId, itemId, lotId, qty) => {
+    if (!canAdjust) {
+      setError('Bạn không có quyền xử lý hàng hết hạn.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Bạn có chắc chắn muốn xử lý (vứt bỏ) ${qty} sản phẩm hết hạn này không? Thao tác này không thể hoàn tác.`
+    );
+    
+    if (!confirmed) return;
+
+    setDisposing(true);
+    setError('');
+    
+    try {
+      const selectedItem = items.find(i => i._id === itemId) || 
+                          balances.find(b => (b.item_id?._id || b.item_id) === itemId)?.item_id;
+      
+      const uom_id = selectedItem?.base_uom_id?._id || 
+                     selectedItem?.base_uom_id || 
+                     selectedItem?.uom_id;
+
+      const payload = {
+        location_id: locationId,
+        item_id: itemId,
+        lot_id: lotId,
+        qty: -Math.abs(qty), // Negative to reduce inventory
+        uom_id: uom_id || undefined,
+        reason: 'EXPIRED: Xử lý hàng hết hạn - vứt bỏ'
+      };
+
+      const res = await workflowService.adjustInventory(payload);
+      
+      if (res.success) {
+        setSuccess('Đã xử lý hàng hết hạn thành công.');
+        loadBalances(balPag.page);
+        loadSummary();
+      } else {
+        setError(res.message || 'Xử lý hàng hết hạn thất bại');
+      }
+    } catch (err) {
+      setError('Có lỗi xảy ra khi xử lý hàng hết hạn');
+      console.error('Disposal error:', err);
+    } finally {
+      setDisposing(false);
+    }
+  };
 
   /* ── Adjust ── */
   useEffect(() => {
@@ -531,6 +618,19 @@ export default function ManagerInventoryPage() {
               {locationsLoading && <p className='mt-0.5 text-[11px] text-slate-400'>Đang tải danh sách kho...</p>}
             </div>
 
+            <div className='min-w-[180px]'>
+              <select
+                value={expiryFilter}
+                onChange={e => setExpiryFilter(e.target.value)}
+                className='w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+              >
+                <option value='ALL'>Tất cả tình trạng</option>
+                <option value='NORMAL'>Bình thường</option>
+                <option value='EXPIRING_SOON'>Sắp hết hạn</option>
+                <option value='EXPIRED'>Hết hạn</option>
+              </select>
+            </div>
+
             <div className='relative flex-1'>
               <Search className='pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400' />
               <input
@@ -556,7 +656,7 @@ export default function ManagerInventoryPage() {
                   )}
                   <th className='px-4 py-3 font-medium text-slate-600'>Lô</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Tồn kho</th>
-                  <th className='px-4 py-3 font-medium text-slate-600 text-right'>Đặt trước</th>
+                  <th className='px-4 py-3 font-medium text-slate-600 text-right'>Giá trị</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Khả dụng</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right w-24'>Thao tác</th>
                 </tr>
@@ -579,8 +679,20 @@ export default function ManagerInventoryPage() {
                     const locId = g.location_id?._id ?? g.location_id;
                     const itemId = g.item_id?._id ?? g.item_id;
                     const qty = g.qty_on_hand ?? 0;
-                    const reserved = g.qty_reserved ?? 0;
-                    const avail = g.qty_available ?? (qty - reserved);
+                    const itemCostPrice = typeof g.item_id === 'object' ? (g.item_id.cost_price || 0) : 0;
+                    const totalValue = qty * itemCostPrice;
+                    
+                    console.log('🔍 DEBUG: Item value calculation:', {
+                      item: getItemName(g.item_id),
+                      qty,
+                      itemCostPrice,
+                      totalValue,
+                      item_id_type: typeof g.item_id,
+                      item_id_keys: typeof g.item_id === 'object' ? Object.keys(g.item_id) : 'not object',
+                      cost_price_exists: typeof g.item_id === 'object' && 'cost_price' in g.item_id,
+                      cost_price_value: typeof g.item_id === 'object' ? g.item_id.cost_price : 'N/A'
+                    });
+                    const avail = g.qty_available ?? qty;
                     const isNegative = qty < 0;
                     const expanded = !!expandedGroupKeys[g.key];
 
@@ -625,7 +737,9 @@ export default function ManagerInventoryPage() {
                             </button>
                           </td>
                           <td className={`px-4 py-3 text-right font-medium ${isNegative ? 'text-red-600' : ''}`}>{qty}</td>
-                          <td className='px-4 py-3 text-right text-slate-500'>{reserved}</td>
+                          <td className='px-4 py-3 text-right text-slate-700'>
+                            {totalValue > 0 ? `${totalValue.toLocaleString('vi-VN')} ₫` : '-'}
+                          </td>
                           <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                             {avail}
                           </td>
@@ -677,16 +791,25 @@ export default function ManagerInventoryPage() {
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600'>MFG</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600'>Tình trạng</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Tồn</th>
-                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Đặt trước</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Giá trị</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Khả dụng</th>
-                                        {canAdjust && <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right w-28'>Thao tác</th>}
+                                        {canAdjust && <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right w-32'>Thao tác</th>}
                                       </tr>
                                     </thead>
                                     <tbody className='divide-y divide-slate-100'>
                                       {g.lots.map((l, i) => {
                                         const lotId = l.lot_id?._id ?? l.lot_id ?? '';
                                         const lotQty = l.qty_on_hand ?? 0;
-                                        const lotReserved = l.qty_reserved ?? 0;
+                                        const lotCostPrice = typeof g.item_id === 'object' ? (g.item_id.cost_price || 0) : 0;
+                                        const lotValue = lotQty * lotCostPrice;
+                                        
+                                        console.log('🔍 DEBUG: Lot value calculation:', {
+                                          lot: getLotCode(l.lot_id),
+                                          lotQty,
+                                          lotCostPrice,
+                                          lotValue,
+                                          item_id: g.item_id
+                                        });
                                         const lotAvail = getQtyAvailable(l);
                                         const lotNegative = lotQty < 0;
                                         const status = getLotExpiryStatus(l);
@@ -721,35 +844,49 @@ export default function ManagerInventoryPage() {
                                             <td className={`px-2 py-2 text-right text-xs font-medium ${lotNegative ? 'text-red-600' : 'text-slate-900'}`}>
                                               {lotQty}
                                             </td>
-                                            <td className='px-2 py-2 text-right text-xs text-slate-600'>{lotReserved}</td>
+                                            <td className='px-2 py-2 text-right text-xs text-slate-600'>
+                                              {lotValue > 0 ? `${lotValue.toLocaleString('vi-VN')} ₫` : '-'}
+                                            </td>
                                             <td className={`px-2 py-2 text-right text-xs font-semibold ${lotAvail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                                               {lotAvail}
                                             </td>
                                             {canAdjust && (
                                               <td className='px-2 py-2 text-right'>
-                                                <button
-                                                  type='button'
-                                                  onClick={async () => {
-                                                    adjustFromRowRef.current = true;
-                                                    setAdjustForm({
-                                                      location_id: locId,
-                                                      item_id: itemId,
-                                                      lot_id: lotId,
-                                                      qty_adjustment: '',
-                                                      reason: '',
-                                                      adjustment_type: 'COUNT_ADJUSTMENT',
-                                                    });
-                                                    if (itemId) {
-                                                      const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
-                                                      const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
-                                                      setAdjustLots(list);
-                                                    } else setAdjustLots([]);
-                                                    setAdjustOpen(true);
-                                                  }}
-                                                  className='rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
-                                                >
-                                                  Điều chỉnh
-                                                </button>
+                                                <div className='flex gap-1'>
+                                                  <button
+                                                    type='button'
+                                                    onClick={async () => {
+                                                      adjustFromRowRef.current = true;
+                                                      setAdjustForm({
+                                                        location_id: locId,
+                                                        item_id: itemId,
+                                                        lot_id: lotId,
+                                                        qty_adjustment: '',
+                                                        reason: '',
+                                                        adjustment_type: 'COUNT_ADJUSTMENT',
+                                                      });
+                                                      if (itemId) {
+                                                        const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
+                                                        const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
+                                                        setAdjustLots(list);
+                                                      } else setAdjustLots([]);
+                                                      setAdjustOpen(true);
+                                                    }}
+                                                    className='rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                                                  >
+                                                    Điều chỉnh
+                                                  </button>
+                                                  {status && status.severity === 'EXPIRED' && lotQty > 0 && (
+                                                    <button
+                                                      type='button'
+                                                      onClick={() => handleDisposal(locId, itemId, lotId, lotQty)}
+                                                      disabled={disposing}
+                                                      className='rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-600 hover:bg-red-100 disabled:opacity-50'
+                                                    >
+                                                      {disposing ? 'Đang xử lý...' : 'Xử lí'}
+                                                    </button>
+                                                  )}
+                                                </div>
                                               </td>
                                             )}
                                           </tr>
@@ -796,7 +933,19 @@ export default function ManagerInventoryPage() {
       )}
 
       {/* === Transactions Tab === */}
-      {tab === 'transactions' && (
+      {tab === 'transactions' && (() => {
+        const filteredTxns = (() => {
+          const s = (txnSearch || '').toLowerCase();
+          if (!s) return txns;
+          return txns.filter(t => {
+            const name = getItemName(t.item_id).toLowerCase();
+            const loc = getLocName(t.location_id).toLowerCase();
+            const notes = (t.notes || '').toLowerCase();
+            return name.includes(s) || loc.includes(s) || notes.includes(s);
+          });
+        })();
+
+        return (
         <div className='space-y-3'>
           <div className='flex flex-col gap-3 sm:flex-row'>
             <div className='relative flex-1'>
@@ -854,7 +1003,8 @@ export default function ManagerInventoryPage() {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* === Alerts Tab === */}
       {tab === 'alerts' && (

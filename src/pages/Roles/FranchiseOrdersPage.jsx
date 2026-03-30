@@ -85,7 +85,7 @@ export default function FranchiseOrdersPage() {
   const [newOrder, setNewOrder] = useState({
     order_date: getLocalDateTimeString(),
     is_urgent: false,
-    payment_type: 'BANK_TRANSFER',
+    payment_type: 'COD', // Default to COD for staff orders
     lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
   });
 
@@ -101,6 +101,7 @@ export default function FranchiseOrdersPage() {
       });
       if (res.success && res.data) {
         const list = Array.isArray(res.data.data) ? res.data.data : [];
+        
         setOrders(list);
         setPagination({
           page: res.data.pagination?.page ?? page,
@@ -136,14 +137,21 @@ export default function FranchiseOrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
+  // Reset form function
+  const resetOrderForm = () => {
+    setNewOrder({
+      order_date: getLocalDateTimeString(),
+      is_urgent: false,
+      payment_type: 'COD',
+      lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
+    });
+    setCreateError('');
+  };
+
   // Mỗi lần mở modal tạo đơn, đặt lại ngày giờ = hiện tại (local)
   useEffect(() => {
     if (createOpen) {
-      setNewOrder(prev => ({
-        ...prev,
-        order_date: getLocalDateTimeString(),
-        payment_type: 'BANK_TRANSFER',
-      }));
+      resetOrderForm();
     }
   }, [createOpen]);
 
@@ -238,12 +246,20 @@ export default function FranchiseOrdersPage() {
     const orderDateISO = newOrder.order_date
       ? new Date(newOrder.order_date).toISOString()
       : new Date().toISOString();
+    // Validate payment_type before creating body
+    if (!['BANK_TRANSFER', 'COD'].includes(newOrder.payment_type)) {
+      console.warn('⚠️ Invalid payment_type:', newOrder.payment_type, 'defaulting to BANK_TRANSFER');
+      newOrder.payment_type = 'BANK_TRANSFER';
+    }
+    
     const body = {
       store_org_unit_id: user?.org_unit_id || undefined,
       order_date: orderDateISO,
       is_urgent: Boolean(newOrder.is_urgent),
+      payment_method: newOrder.payment_type === 'COD' ? 'COD' : 'ONLINE',
       lines,
     };
+    
     return { error: null, body };
   };
 
@@ -268,13 +284,24 @@ export default function FranchiseOrdersPage() {
     setExistingOrderForPayment(null);
     setPendingOrderBody(body);
     setPendingOrderTotal(estimatedTotal);
-    setNewOrder(prev => ({ ...prev, payment_type: 'BANK_TRANSFER' }));
+    // Don't reset payment_type - keep user's selection
     setCreateOpen(false);
     setConfirmOpen(true);
   };
 
   const createPaymentForOrder = async (orderId, orderNo, paymentType, orderAmount) => {
     if (!paymentType) return;
+    
+    // COD orders don't need immediate payment creation
+    if (paymentType === 'COD') {
+      setSuccess(`Đã đặt hàng COD cho đơn ${orderNo}. Thanh toán khi nhận hàng.`);
+      setConfirmOpen(false);
+      setCreateOpen(false);
+      setExistingOrderForPayment(null);
+      resetOrderForm();
+      return;
+    }
+    
     try {
       const res = await paymentService.createPayment({
         order_id: orderId,
@@ -307,20 +334,6 @@ export default function FranchiseOrdersPage() {
         // Đóng popup xác nhận đơn, mở alert xác nhận thanh toán
         setConfirmOpen(false);
         setPaymentConfirmOpen(true);
-      } else {
-        // CASH: đóng flow và reset form
-        setSuccess(`Đã đặt hàng và thanh toán tiền mặt cho đơn ${orderNo}.`);
-        setConfirmOpen(false);
-        setCreateOpen(false);
-        setExistingOrderForPayment(null);
-        setNewOrder({
-          order_date: getLocalDateTimeString(),
-          is_urgent: false,
-          payment_type: 'CASH',
-          lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
-        });
-        setPendingOrderBody(null);
-        setPendingOrderTotal(0);
       }
     } catch (error) {
       console.error('Create payment error:', error);
@@ -355,6 +368,31 @@ export default function FranchiseOrdersPage() {
 
       const paymentType = newOrder.payment_type || 'BANK_TRANSFER';
 
+      // For COD orders, submit and approve immediately after creation
+      if (paymentType === 'COD') {
+        try {
+          console.log(`Submitting COD order:`, orderId);
+          const submitRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
+          if (!submitRes.success) {
+            console.error(`Failed to submit COD order:`, submitRes.message);
+            setCreateError(`Đơn COD đã tạo nhưng không thể gửi: ${submitRes.message}`);
+          } else {
+            console.log(`COD order submitted successfully, now approving...`);
+            // Auto-approve COD orders (payment guaranteed on delivery)
+            const approveRes = await workflowService.updateInternalOrderStatus(orderId, 'APPROVED');
+            if (!approveRes.success) {
+              console.error(`Failed to approve COD order:`, approveRes.message);
+              setCreateError(`Đơn COD đã gửi nhưng không thể duyệt: ${approveRes.message}`);
+            } else {
+              console.log(`COD order approved successfully`);
+            }
+          }
+        } catch (submitError) {
+          console.error(`Error submitting/approving COD order:`, submitError);
+          setCreateError(`Đơn COD đã tạo nhưng có lỗi khi xử lý: ${submitError.message}`);
+        }
+      }
+
       await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
       setCreateError('');
       loadOrders(1).catch(() => { /* danh sách sẽ cập nhật khi user tự refresh */ });
@@ -384,11 +422,7 @@ export default function FranchiseOrdersPage() {
         return;
       }
       setCreateOpen(false);
-      setNewOrder({
-        order_date: getLocalDateTimeString(),
-        is_urgent: false,
-        lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
-      });
+      resetOrderForm();
       setSuccess('Đã lưu nháp. Vào Chi tiết đơn và bấm "Gửi đơn" khi sẵn sàng gửi lên bếp trung tâm.');
       setCreateError('');
       loadOrders(1).catch(() => {});
@@ -430,8 +464,8 @@ export default function FranchiseOrdersPage() {
           ? new Date(fullOrder.order_date).toISOString().slice(0, 16)
           : getLocalDateTimeString(),
         is_urgent: !!fullOrder.is_urgent,
-        // Staff luôn sử dụng thanh toán chuyển khoản
-        payment_type: 'BANK_TRANSFER',
+        // Use existing payment method if available, otherwise default to COD for staff
+        payment_type: fullOrder.payment_method === 'COD' ? 'COD' : 'BANK_TRANSFER',
         lines: mappedLines.length
           ? mappedLines
           : prev.lines,
@@ -712,6 +746,7 @@ export default function FranchiseOrdersPage() {
             <tr>
               <th className='px-4 py-3'>Số đơn</th>
               <th className='px-4 py-3'>Ngày đặt</th>
+              <th className='px-4 py-3'>Thanh toán</th>
               <th className='px-4 py-3'>Gấp</th>
               <th className='px-4 py-3'>Tổng tiền</th>
               <th className='px-4 py-3'>Trạng thái</th>
@@ -721,19 +756,58 @@ export default function FranchiseOrdersPage() {
           <tbody className='divide-y divide-slate-100'>
             {loading && (
               <tr>
-                <td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td>
+                <td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td>
               </tr>
             )}
             {!loading && !filteredOrders.length && (
               <tr>
-                <td colSpan={6} className='px-4 py-6 text-center text-slate-400'>Không có đơn nào.</td>
+                <td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Không có đơn nào.</td>
               </tr>
             )}
-            {!loading && filteredOrders.map(o => (
-              <tr key={o._id}>
-                <td className='px-4 py-3 font-medium text-slate-900'>{o.order_no || o._id}</td>
+            {!loading && filteredOrders.map((o, index) => (
+              <tr key={o._id} style={{backgroundColor: o.payment_method === 'COD' ? '#fef3c7' : 'white'}}>
+                <td className='px-4 py-3 font-medium text-slate-900'>
+                  {o.order_no || o._id}
+                </td>
                 <td className='px-4 py-3 text-slate-700'>
                   {o.order_date ? new Date(o.order_date).toLocaleString('vi-VN') : '-'}
+                </td>
+                <td className='px-4 py-3 text-xs'>
+                  <div className="flex flex-col gap-1">
+                    {o.payment_method === 'COD' ? (
+                      <>
+                        <span className='inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-600'>COD</span>
+                        {o.payment_status === 'COD_PENDING' && (
+                          <span className='inline-flex rounded-full bg-yellow-50 px-2 py-0.5 text-xs font-medium text-yellow-600'>Chưa thanh toán</span>
+                        )}
+                        {o.payment_status === 'COD_COLLECTED' && (
+                          <span className='inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600'>Đã thu tiền</span>
+                        )}
+                        {o.payment_status === 'COD_CONFIRMED' && (
+                          <span className='inline-flex rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600'>Đã thanh toán</span>
+                        )}
+                        {o.payment_status === 'PAID' && (
+                          <span className='inline-flex rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600'>Đã thanh toán</span>
+                        )}
+                      </>
+                    ) : o.payment_method === 'ONLINE' ? (
+                      <>
+                        <span className='inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600'>Chuyển khoản</span>
+                        {o.payment_status === 'UNPAID' && (
+                          <span className='inline-flex rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600'>Chưa thanh toán</span>
+                        )}
+                        {o.payment_status === 'PAID' && (
+                          <span className='inline-flex rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600'>Đã thanh toán</span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span className='inline-flex rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600'>
+                          DEBUG: {o.payment_method || 'null'} / {o.payment_status || 'null'}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </td>
                 <td className='px-4 py-3 text-xs'>
                   {o.is_urgent ? (
@@ -1082,14 +1156,37 @@ export default function FranchiseOrdersPage() {
               </div>
 
               <div>
-                <span className='block text-sm font-medium text-slate-700 mb-1'>Hình thức thanh toán</span>
-                <div className='inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700'>
-                  <span className='w-2 h-2 rounded-full bg-emerald-500' />
-                  <span>Chỉ hỗ trợ thanh toán chuyển khoản (PayOS)</span>
+                <label className='block text-sm font-medium text-slate-700 mb-2'>Hình thức thanh toán</label>
+                <div className='space-y-2'>
+                  <label className='flex items-center gap-2'>
+                    <input
+                      type='radio'
+                      name='payment_type'
+                      value='BANK_TRANSFER'
+                      checked={newOrder.payment_type === 'BANK_TRANSFER'}
+                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
+                      className='text-orange-500'
+                    />
+                    <div>
+                      <div className='text-sm font-medium'>Chuyển khoản ngân hàng (PayOS)</div>
+                      <div className='text-xs text-slate-500'>Thanh toán trực tuyến qua PayOS</div>
+                    </div>
+                  </label>
+                  <label className='flex items-center gap-2'>
+                    <input
+                      type='radio'
+                      name='payment_type'
+                      value='COD'
+                      checked={newOrder.payment_type === 'COD'}
+                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
+                      className='text-orange-500'
+                    />
+                    <div>
+                      <div className='text-sm font-medium'>Thanh toán khi nhận hàng (COD)</div>
+                      <div className='text-xs text-slate-500'>Tài xế thu tiền mặt khi giao hàng</div>
+                    </div>
+                  </label>
                 </div>
-                <p className='mt-1 text-xs text-slate-500'>
-                  Nhân viên cửa hàng không sử dụng tiền mặt, tất cả đơn hàng được thanh toán qua chuyển khoản PayOS.
-                </p>
               </div>
 
               <div className='flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4'>
@@ -1117,6 +1214,31 @@ export default function FranchiseOrdersPage() {
                           const orderNo = existingOrderForPayment.order_no || orderId;
                           const orderAmount = existingOrderForPayment.total_amount || 0;
                           const paymentType = newOrder.payment_type || 'BANK_TRANSFER';
+
+                          // For COD orders, submit and approve immediately
+                          if (paymentType === 'COD') {
+                            try {
+                              console.log(`Submitting existing COD order:`, orderId);
+                              const submitRes = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
+                              if (!submitRes.success) {
+                                console.error(`Failed to submit existing COD order:`, submitRes.message);
+                                setCreateError(`Đơn COD đã tạo nhưng không thể gửi: ${submitRes.message}`);
+                              } else {
+                                console.log(`Existing COD order submitted successfully, now approving...`);
+                                // Auto-approve COD orders (payment guaranteed on delivery)
+                                const approveRes = await workflowService.updateInternalOrderStatus(orderId, 'APPROVED');
+                                if (!approveRes.success) {
+                                  console.error(`Failed to approve existing COD order:`, approveRes.message);
+                                  setCreateError(`Đơn COD đã gửi nhưng không thể duyệt: ${approveRes.message}`);
+                                } else {
+                                  console.log(`Existing COD order approved successfully`);
+                                }
+                              }
+                            } catch (submitError) {
+                              console.error(`Error submitting/approving existing COD order:`, submitError);
+                              setCreateError(`Đơn COD đã tạo nhưng có lỗi khi xử lý: ${submitError.message}`);
+                            }
+                          }
 
                           await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
                           setCreateError('');

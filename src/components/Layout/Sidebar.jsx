@@ -16,6 +16,8 @@ import {
   X,
   ChevronDown,
   RotateCcw,
+  CheckCircle,
+  MapPin,
 } from "lucide-react";
 import BrandLogo from "../BrandLogo";
 
@@ -147,6 +149,11 @@ const menuByRole = {
       icon: Settings,
       path: "/app/admin/settings",
     },
+    {
+      title: "Quản lý bản đồ",
+      icon: MapPin,
+      path: "/app/admin/location-map",
+    },
   ],
 
   // Manager – vận hành & hiệu suất
@@ -187,9 +194,14 @@ const menuByRole = {
       path: "/app/manager/returns",
     },
     {
-      title: "Báo cáo & hiệu suất",
+      title: "Yêu cầu nguyên liệu",
+      icon: Package,
+      path: "/app/central/material-requests",
+    },
+    {
+      title: "Báo cáo & COD",
       icon: BarChart3,
-      path: "/app/manager/reports",
+      path: "/app/manager/reports-cod",
     },
   ],
 
@@ -211,15 +223,20 @@ const menuByRole = {
       path: "/app/central/production",
     },
     {
+      title: "Bù thiếu hụt sản xuất",
+      icon: Package,
+      path: "/app/central/compensation",
+    },
+    {
+      title: "Thực hiện sản xuất bù",
+      icon: TruckIcon,
+      path: "/app/central/compensation-production",
+    },
+    {
       title: "Yêu cầu trả hàng",
       icon: RotateCcw,
       // Dùng chung màn với Manager để duyệt/ xử lý trả hàng
       path: "/app/manager/returns",
-    },
-    {
-      title: "Phiếu giao hàng",
-      icon: TruckIcon,
-      path: "/app/central/shipments",
     },
     {
       title: "Nguyên liệu & lô sản xuất",
@@ -245,11 +262,11 @@ const menuByRole = {
       icon: TruckIcon,
       path: "/app/central/shipments",
     },
-    {
-      title: "Tổng hợp đơn",
-      icon: ClipboardList,
-      path: "/app/supply/orders",
-    },
+    // {
+    //   title: "Tổng hợp đơn",
+    //   icon: ClipboardList,
+    //   path: "/app/supply/orders",
+    // },
     {
       title: "Đơn hàng nội bộ",
       icon: ClipboardList,
@@ -285,9 +302,9 @@ const menuByRole = {
       path: "/app/store/orders",
     },
     {
-      title: "Nhận hàng",
-      icon: Package,
-      path: "/app/store/receiving",
+      title: "Bàn giao & Nhận hàng",
+      icon: CheckCircle,
+      path: "/app/store/receipt-confirmation",
     },
     {
       title: "Trả hàng",
@@ -299,6 +316,11 @@ const menuByRole = {
       icon: Warehouse,
       path: "/app/store/inventory",
     },
+    {
+      title: "Bản đồ",
+      icon: MapPin,
+      path: "/app/store/location-map",
+    },
   ],
 
   // Driver – tài xế
@@ -309,14 +331,9 @@ const menuByRole = {
       path: "/app/driver/dashboard",
     },
     {
-      title: "Lô giao hàng",
+      title: "Giao hàng & Bản đồ",
       icon: Package,
       path: "/app/driver/shipments",
-    },
-    {
-      title: "Vận chuyển",
-      icon: TruckIcon,
-      path: "/app/driver/delivery",
     },
   ],
 };

@@ -17,7 +17,12 @@ import {
   RefreshCcw,
   Truck,
   X,
+  ClipboardCheck,
+  MapPin,
+  Save,
+  Edit
 } from 'lucide-react';
+import LocationMapPicker from '../../components/ui/LocationMapPicker';
 
 const getRows = data => {
   if (Array.isArray(data)) return data;
@@ -87,6 +92,7 @@ export default function FranchiseStoreDashboard() {
   const [recentOrders, setRecentOrders] = useState([]);
 
   const [receiptsDraft, setReceiptsDraft] = useState([]);
+  const [pendingReceipts, setPendingReceipts] = useState([]);
   const [lowStockAlerts, setLowStockAlerts] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState([]);
 
@@ -94,6 +100,11 @@ export default function FranchiseStoreDashboard() {
   const [selectedDelivery, setSelectedDelivery] = useState(null);
   const [issueDescription, setIssueDescription] = useState('');
   const [issueSubmitting, setIssueSubmitting] = useState(false);
+
+  const [storeData, setStoreData] = useState(null);
+  const [editingLocation, setEditingLocation] = useState(false);
+  const [editCoordinates, setEditCoordinates] = useState({ latitude: '', longitude: '' });
+  const [updatingLocation, setUpdatingLocation] = useState(false);
 
   const pendingCount = useMemo(() => deliveries.filter(d => d.status === 'pending').length, [deliveries]);
   const shippingCount = useMemo(() => deliveries.filter(d => d.status === 'shipping').length, [deliveries]);
@@ -120,10 +131,11 @@ export default function FranchiseStoreDashboard() {
     setLoading(true);
     setError('');
     try {
-      const [overviewRes, ordersRes, draftReceiptsRes, lowStockRes, expiryRes] = await Promise.all([
+      const [overviewRes, ordersRes, draftReceiptsRes, pendingReceiptsRes, lowStockRes, expiryRes] = await Promise.all([
         workflowService.getDashboardOverview({}),
         workflowService.getInternalOrders({ limit: 8 }),
         workflowService.getGoodsReceipts({ status: 'DRAFT', limit: 20 }),
+        workflowService.getPendingReceipts({ limit: 10 }),
         workflowService.getAlertsLowStock({}),
         workflowService.getAlertsExpiry({ days_threshold: 14 }),
       ]);
@@ -137,8 +149,27 @@ export default function FranchiseStoreDashboard() {
       const receipts = getList(draftReceiptsRes);
       setReceiptsDraft(receipts.slice(0, 12));
 
+      // Pending receipt confirmations
+      const pendingRec = getList(pendingReceiptsRes);
+      setPendingReceipts(pendingRec.slice(0, 10));
+
       setLowStockAlerts(getList(lowStockRes).slice(0, 20));
       setExpiryAlerts(getList(expiryRes).slice(0, 20));
+
+      // Fetch user's store
+      if (user?.org_unit_id) {
+        try {
+          const storeId = typeof user.org_unit_id === 'object' ? user.org_unit_id._id : user.org_unit_id;
+          const storeRes = await workflowService.getOrgUnit(storeId);
+          if (storeRes.success && storeRes.data) {
+            setStoreData(storeRes.data);
+            setEditCoordinates({
+              latitude: storeRes.data.coordinates?.latitude?.toString() || '',
+              longitude: storeRes.data.coordinates?.longitude?.toString() || ''
+            });
+          }
+        } catch(e) { console.error('Error fetching store', e); }
+      }
     } catch (e) {
       setError(e?.message || 'Không thể tải dashboard');
     } finally {
@@ -201,6 +232,31 @@ export default function FranchiseStoreDashboard() {
 
   const topLowStockAlerts = useMemo(() => lowStockAlerts.slice(0, 6), [lowStockAlerts]);
 
+  const handleSaveLocation = async () => {
+    if (!storeData?._id) return;
+    setUpdatingLocation(true);
+    try {
+      const res = await workflowService.updateOrgUnitCoordinates(storeData._id, {
+        latitude: parseFloat(editCoordinates.latitude),
+        longitude: parseFloat(editCoordinates.longitude)
+      });
+      if (res.success) {
+        alert('Cập nhật vị trí thành công');
+        setEditingLocation(false);
+        setStoreData(prev => ({
+          ...prev,
+          coordinates: { latitude: parseFloat(editCoordinates.latitude), longitude: parseFloat(editCoordinates.longitude) }
+        }));
+      } else {
+        alert(res.message || 'Cập nhật thất bại');
+      }
+    } catch(e) {
+      alert(e?.message || 'Cập nhật thất bại');
+    } finally {
+      setUpdatingLocation(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -252,6 +308,46 @@ export default function FranchiseStoreDashboard() {
           color="destructive"
         />
       </div>
+
+      {/* Map Section */}
+      {storeData && (
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-orange-500" /> Vị trí cửa hàng của bạn
+            </h2>
+            {!editingLocation ? (
+              <button onClick={() => setEditingLocation(true)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700">
+                <Edit className="h-4 w-4" /> Cập nhật
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button onClick={() => {
+                  setEditingLocation(false);
+                  setEditCoordinates({
+                    latitude: storeData.coordinates?.latitude?.toString() || '',
+                    longitude: storeData.coordinates?.longitude?.toString() || ''
+                  });
+                }} className="text-sm text-slate-500 hover:text-slate-700">Hủy</button>
+                <button onClick={handleSaveLocation} disabled={updatingLocation} className="flex items-center gap-2 text-sm bg-orange-500 text-white px-3 py-1.5 rounded-md hover:bg-orange-600 disabled:opacity-60">
+                  <Save className="h-4 w-4" /> {updatingLocation ? 'Đang lưu...' : 'Lưu'}
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <LocationMapPicker 
+            latitude={editingLocation ? editCoordinates.latitude : storeData.coordinates?.latitude}
+            longitude={editingLocation ? editCoordinates.longitude : storeData.coordinates?.longitude}
+            onChange={(lat, lng) => setEditCoordinates({ latitude: lat.toString(), longitude: lng.toString() })}
+            readOnly={!editingLocation}
+            height="300px"
+          />
+          {editingLocation && (
+            <p className="mt-2 text-sm text-slate-500">Kéo hoặc Bấm vào bản đồ để chọn vị trí mới.</p>
+          )}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-2 bg-gradient-to-br from-orange-500/10 via-transparent to-transparent ring-1 ring-orange-500/10">
@@ -382,6 +478,63 @@ export default function FranchiseStoreDashboard() {
           )}
         </div>
       </div>
+
+      {/* Receipt Confirmation Section */}
+      {pendingReceipts.length > 0 && (
+        <div className="rounded-xl border bg-card p-4 shadow-sm bg-gradient-to-br from-green-500/10 via-transparent to-transparent ring-1 ring-green-500/10">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold flex items-center gap-2">
+              <ClipboardCheck className="h-5 w-5" />
+              Chờ Xác Nhận Nhận Hàng
+            </h2>
+            <span className="text-xs text-muted-foreground">{pendingReceipts.length} lô hàng</span>
+          </div>
+
+          <div className="space-y-2">
+            {pendingReceipts.map(receipt => (
+              <div key={receipt.id} className="rounded-lg bg-muted/40 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate text-slate-900">
+                      #{receipt.shipment_number}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Đơn hàng: {receipt.internal_order?.order_number}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Giao lúc: {new Date(receipt.delivered_at).toLocaleString('vi-VN')}
+                    </div>
+                    {receipt.delivery_time_hours > 24 && (
+                      <div className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Quá 24h chưa xác nhận!
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-medium">
+                      {receipt.internal_order?.total_amount?.toLocaleString('vi-VN')} ₫
+                    </div>
+                    <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-700">
+                      Chờ xác nhận
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => window.location.href = '/app/store/receipt-confirmation'}
+                    className="w-full py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 transition-colors"
+                  >
+                    Xác Nhận Nhận Hàng
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Issue Report Modal */}
       {showIssueModal && (

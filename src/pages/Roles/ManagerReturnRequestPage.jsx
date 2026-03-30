@@ -117,9 +117,11 @@ export default function ManagerReturnRequestPage() {
     setActionLoadingId(ret._id);
     setSuccess('');
     try {
-      const res = await workflowService.updateReturnRequestStatus(ret._id, { status: 'APPROVED' });
+      // Uses /review endpoint which triggers replacement order creation
+      const res = await workflowService.reviewReturnRequest(ret._id, { action: 'APPROVE' });
       if (res.success) {
-        setSuccess(`Đã phê duyệt yêu cầu ${ret.return_no || ret._id}.`);
+        const orderNo = res.data?.replacement_order_id || '';
+        setSuccess(`✅ Đã phê duyệt yêu cầu ${ret.return_no || ret._id}. Đơn hàng bù đã được tạo tự động cho Bếp.`);
         await loadDetail(ret._id);
         loadReturns(pagination.page);
       } else alert(res.message || 'Phê duyệt thất bại');
@@ -135,8 +137,9 @@ export default function ManagerReturnRequestPage() {
     setActionLoadingId(ret._id);
     setSuccess('');
     try {
-      const res = await workflowService.updateReturnRequestStatus(ret._id, {
-        status: 'REJECTED',
+      // Uses /review endpoint so rejection is recorded properly
+      const res = await workflowService.reviewReturnRequest(ret._id, {
+        action: 'REJECT',
         rejection_reason: rejectNotes,
       });
       if (res.success) {
@@ -370,12 +373,24 @@ export default function ManagerReturnRequestPage() {
                     </span>
                     <span className='text-slate-500'>Lý do:</span>
                     <span>{detailReturn.reason || '-'}</span>
-                    {detailReturn.resolution_notes && (
+                    {detailReturn.rejection_reason && (
                       <>
-                        <span className='text-slate-500'>Ghi chú xử lý:</span>
-                        <span className='text-red-600'>{detailReturn.resolution_notes}</span>
+                        <span className='text-slate-500'>Lý do từ chối:</span>
+                        <span className='font-medium text-red-600'>{detailReturn.rejection_reason}</span>
                       </>
                     )}
+                    {detailReturn.replacement_order_id && (
+                      <>
+                        <span className='col-span-2 mt-1 block h-px bg-slate-200' />
+                        <span className='text-slate-500 font-medium text-blue-700 flex items-center gap-1'>📦 Đơn hàng bù:</span>
+                        <span className='font-semibold text-blue-700'>
+                          {detailReturn.replacement_order_id?.order_no || detailReturn.replacement_order_id}
+                        </span>
+                        <span className='text-slate-500'>Trạng thái đơn bù:</span>
+                        <span className='font-medium'>{detailReturn.replacement_order_id?.status || '—'}</span>
+                      </>
+                    )}
+
                   </div>
                 </div>
 

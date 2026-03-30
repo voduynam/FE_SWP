@@ -337,10 +337,33 @@ export default function CentralProductionPage() {
     }
   };
 
+  const syncProductionToInventory = async (orderId) => {
+    setActionLoadingId(orderId);
+    setSuccess('');
+    try {
+      const res = await workflowService.syncProductionToInventory(orderId);
+      if (res.success) {
+        setSuccess('Đã đồng bộ tồn kho sản phẩm thành công. Bây giờ có thể tạo phiếu giao hàng.');
+        // Reload detail to show updated info
+        loadDetail(orderId);
+      } else {
+        alert(res.message || 'Đồng bộ tồn kho thất bại');
+      }
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Đồng bộ tồn kho thất bại');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   const loadLotsForItem = async itemId => {
-    if (!itemId) { setLots([]); return; }
+    if (!itemId) { 
+      setLots([]); 
+      return; 
+    }
     const res = await workflowService.getLots({ item_id: itemId, limit: 50 });
-    setLots(getList(res));
+    const lotsList = getList(res);
+    setLots(lotsList);
   };
 
   const submitNewLotOutput = async e => {
@@ -475,6 +498,125 @@ export default function CentralProductionPage() {
     });
   };
 
+  const requestMaterialSupply = async () => {
+    if (!detailOrder) {
+      alert('Không có thông tin đơn sản xuất');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      
+      // Build shortage lines from consumptionRows or consumptionPendingData
+      const shortageLines = [];
+      let sourceData = [];
+      
+      // Use consumptionPendingData if available (from shortage warning), otherwise use consumptionRows
+      if (consumptionPendingData?.toSend && Array.isArray(consumptionPendingData.toSend)) {
+        sourceData = consumptionPendingData.toSend;
+      } else if (consumptionRows.length > 0) {
+        sourceData = consumptionRows.filter(row => row.material_item_id && Number(row.qty) > 0);
+      }
+
+      if (sourceData.length === 0) {
+        alert('Không có nguyên liệu nào để yêu cầu. Vui lòng chọn dòng sản xuất và nhập số lượng tiêu hao trước.');
+        return;
+      }
+
+      for (const row of sourceData) {
+        // Validate numeric values and prevent NaN
+        const qty = Number(row.qty);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          console.warn('Invalid quantity for material:', row.material_item_id, 'qty:', row.qty);
+          continue;
+        }
+        
+        // Find corresponding recipe material for more info
+        const recipeMaterial = recipeMaterials.find(rm => 
+          (rm.material_item_id?._id || rm.material_item_id) === row.material_item_id
+        );
+        
+        // Validate UOM - ensure we have a valid UOM ID
+        let uomId = row.uom_id;
+        if (!uomId && recipeMaterial) {
+          uomId = recipeMaterial.uom_id?._id || recipeMaterial.uom_id;
+        }
+        
+        if (!uomId) {
+          console.warn('Missing UOM for material:', row.material_item_id);
+          continue;
+        }
+        
+        shortageLines.push({
+          item_id: row.material_item_id,
+          quantity_requested: qty,
+          uom_id: uomId,
+          urgency_level: 'URGENT',
+          reason: `Thiếu nguyên liệu cho sản xuất ${detailOrder.prod_order_no || detailOrder._id}`,
+          minimum_required: qty,
+          estimated_cost: 0 // Set to 0, backend will calculate if needed
+        });
+      }
+
+      if (shortageLines.length === 0) {
+        alert('Không có nguyên liệu hợp lệ để yêu cầu. Vui lòng kiểm tra số lượng và đơn vị tính.');
+        return;
+      }
+
+      // Get locations to find raw material warehouse
+      const locationsRes = await workflowService.getLocations({ limit: 100 });
+      let rawLocationId = null;
+      
+      if (locationsRes.success && locationsRes.data) {
+        const locations = Array.isArray(locationsRes.data) ? locationsRes.data : locationsRes.data.data || [];
+        
+        // Find raw material location (prioritize locations with "raw" or "nguyên" in name/code)
+        const rawLocation = locations.find(loc => 
+          (loc.name && (loc.name.toLowerCase().includes('raw') || loc.name.toLowerCase().includes('nguyên'))) ||
+          (loc.code && (loc.code.toLowerCase().includes('raw') || loc.code.toLowerCase().includes('nguyen')))
+        );
+        
+        if (rawLocation) {
+          rawLocationId = rawLocation._id;
+        } else if (locations.length > 0) {
+          // Fallback to first location if no raw location found
+          rawLocationId = locations[0]._id;
+        }
+      }
+
+      if (!rawLocationId) {
+        alert('Không tìm thấy kho nguyên liệu. Vui lòng liên hệ quản trị viên để cấu hình kho.');
+        return;
+      }
+
+      // Create material request
+      const requestPayload = {
+        request_reason: 'PRODUCTION_SHORTAGE',
+        priority: 'URGENT',
+        production_order_id: detailOrder._id,
+        location_id: rawLocationId,
+        notes: `Yêu cầu bổ sung nguyên liệu khẩn cấp cho đơn sản xuất ${detailOrder.prod_order_no || detailOrder._id}. Phát hiện thiếu hụt khi ghi nhận tiêu hao.`,
+        lines: shortageLines
+      };
+
+      const res = await workflowService.createMaterialRequest(requestPayload);
+      
+      if (res.success) {
+        setSuccess(`Đã gửi yêu cầu bổ sung nguyên liệu cho Manager. Mã yêu cầu: ${res.data.request_no || 'N/A'}`);
+        setConsumptionWarning(null);
+        setConsumptionPendingData(null);
+      } else {
+        console.error('Material request failed:', res);
+        alert(res.message || 'Tạo yêu cầu nguyên liệu thất bại');
+      }
+    } catch (error) {
+      console.error('Error creating material request:', error);
+      alert('Có lỗi khi tạo yêu cầu nguyên liệu: ' + (error.message || 'Unknown error'));
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const submitConsumption = async e => {
     e.preventDefault();
     if (!detailId || !consumptionForm.prod_order_line_id) {
@@ -528,9 +670,8 @@ export default function CentralProductionPage() {
     setConsumptionPendingData(null);
     setCreating(true);
     try {
-      let ok = 0;
-      let fail = 0;
-      for (const row of toSend) {
+      // Tối ưu: Gọi API song song thay vì tuần tự
+      const promises = toSend.map(async (row) => {
         const payload = {
           prod_order_line_id: consumptionForm.prod_order_line_id,
           material_item_id: row.material_item_id,
@@ -538,10 +679,19 @@ export default function CentralProductionPage() {
           uom_id: row.uom_id,
         };
         if (row.lot_id) payload.lot_id = row.lot_id;
-        const res = await workflowService.recordProductionConsumption(detailId, payload);
-        if (res.success) ok++;
-        else fail++;
-      }
+        
+        try {
+          const res = await workflowService.recordProductionConsumption(detailId, payload);
+          return { success: res.success, item: row.material_item_id };
+        } catch (err) {
+          return { success: false, item: row.material_item_id, error: err.message };
+        }
+      });
+
+      const results = await Promise.all(promises);
+      const ok = results.filter(r => r.success).length;
+      const fail = results.filter(r => !r.success).length;
+      
       setSuccess(fail === 0 ? `Đã ghi nhận tiêu hao ${ok} nguyên liệu.` : `Ghi nhận ${ok} thành công, ${fail} thất bại.`);
       setShowConsumption(false);
       setConsumptionForm({ prod_order_line_id: '' });
@@ -619,8 +769,14 @@ export default function CentralProductionPage() {
   const formatLotLabel = (lot) => {
     const code = lot?.lot_code || lot?._id || '—';
     const exp = lot?.exp_date ? new Date(lot.exp_date).toLocaleDateString('vi-VN') : '';
-    if (!exp) return code;
-    return isLotExpired(lot) ? `${code} — Hết hạn ${exp}` : `${code} — HSD ${exp}`;
+    const qty = lot?.qty_on_hand || lot?.quantity || 0;
+    
+    let label = code;
+    if (qty > 0) label += ` (Tồn: ${qty})`;
+    if (exp) {
+      label += isLotExpired(lot) ? ` — Hết hạn ${exp}` : ` — HSD ${exp}`;
+    }
+    return label;
   };
 
   return (
@@ -780,6 +936,28 @@ export default function CentralProductionPage() {
                     <button disabled={actionLoadingId === detailOrder._id} onClick={() => updateStatus(detailOrder, 'CANCELLED')} className='rounded-lg border border-red-200 px-4 py-2 text-sm text-red-600 hover:bg-red-50'>Hủy lệnh</button>
                   </div>
                 )}
+                {detailOrder.status === 'DONE' && (() => {
+                  const lines = detailOrder.lines || [];
+                  const hasOutput = lines.some(l => (l.output?.length ?? 0) > 0);
+                  return (
+                    <div className='space-y-2'>
+                      <div className='flex flex-wrap gap-2'>
+                        <button
+                          onClick={() => syncProductionToInventory(detailOrder._id)}
+                          disabled={actionLoadingId === detailOrder._id}
+                          className='rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
+                        >
+                          Đồng bộ tồn kho
+                        </button>
+                        {hasOutput && (
+                          <p className='text-xs text-slate-600 self-center'>
+                            Nếu không thể tạo phiếu giao hàng, hãy đồng bộ lại tồn kho sản phẩm.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {detailOrder.status === 'IN_PROGRESS' && (() => {
                   const lines = detailOrder.lines || [];
                   const allHaveConsumption = lines.length > 0 && lines.every(l => (l.consumption?.length ?? 0) > 0);
@@ -845,6 +1023,7 @@ export default function CentralProductionPage() {
                         <p className='mt-2 text-xs text-amber-600'>Tiêu hao có thể tạo tồn âm.</p>
                         <div className='mt-3 flex gap-2'>
                           <button type='button' onClick={confirmConsumptionAnyway} disabled={creating} className='rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60'>Tiếp tục dù vậy</button>
+                          <button type='button' onClick={() => requestMaterialSupply()} disabled={creating} className='rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'>Yêu cầu bổ sung nguyên liệu</button>
                           <button type='button' onClick={() => { setConsumptionWarning(null); setConsumptionPendingData(null); }} className='rounded border border-amber-400 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-100'>Hủy</button>
                         </div>
                       </div>
@@ -876,7 +1055,7 @@ export default function CentralProductionPage() {
                                 <td className='px-3 py-2 text-slate-600'>{recipeMaterials[idx]?.uom_id?.code ?? recipeMaterials[idx]?.uom_id?.name ?? row.uom_id ?? '—'}</td>
                                 <td className='px-3 py-2 text-slate-600'>{row.qty_per_batch ?? 0}</td>
                                 <td className='px-3 py-2'>
-                                  <input type='number' min={0} step={0.01} value={row.qty} onChange={e => setConsumptionRowQty(idx, e.target.value)} className='w-24 rounded border border-slate-200 px-2 py-1 text-sm' />
+                                  <input type='number' min={0.001} step={0.001} value={row.qty} onChange={e => setConsumptionRowQty(idx, e.target.value)} className='w-24 rounded border border-slate-200 px-2 py-1 text-sm' />
                                 </td>
                                 <td className='px-3 py-2'>
                                   <select value={row.lot_id} onChange={e => setConsumptionRowLot(idx, e.target.value)} className='min-w-[120px] rounded border border-slate-200 px-2 py-1 text-sm'>
@@ -899,6 +1078,7 @@ export default function CentralProductionPage() {
                     {!recipeMaterialsLoading && consumptionForm.prod_order_line_id && consumptionRows.length === 0 && <p className='mb-2 text-sm text-amber-600'>Công thức không có nguyên liệu.</p>}
                     <div className='mt-3 flex gap-2'>
                       <button type='submit' disabled={creating || consumptionRows.length === 0} className='rounded bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60'>Ghi nhận tất cả</button>
+                      <button type='button' onClick={requestMaterialSupply} disabled={creating || consumptionRows.length === 0} className='rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'>Yêu cầu nguyên liệu</button>
                       <button type='button' onClick={() => { setShowConsumption(false); setConsumptionWarning(null); setConsumptionPendingData(null); }} className='rounded border border-slate-300 px-4 py-2 text-sm text-slate-600'>Đóng</button>
                     </div>
                   </form>
