@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Truck, MapPin, RefreshCcw, CheckCircle, ArrowRight, History } from 'lucide-react';
+import { Truck, MapPin, RefreshCcw, CheckCircle, ArrowRight, History, Navigation, Wallet } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
@@ -57,6 +57,25 @@ function buildShipmentToRouteId(myRoutesList) {
   return map;
 }
 
+function toNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 export default function DriverShipmentsPage() {
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -66,12 +85,30 @@ export default function DriverShipmentsPage() {
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [deliveryPhotoFile, setDeliveryPhotoFile] = useState(null);
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState('');
+  const [codCollectedAmount, setCodCollectedAmount] = useState('');
+  const [codCollectionNotes, setCodCollectionNotes] = useState('');
+  const [codEvidenceFiles, setCodEvidenceFiles] = useState([]);
   const [shipmentToRouteId, setShipmentToRouteId] = useState({});
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
   const [deliveredShipments, setDeliveredShipments] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyPag, setHistoryPag] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 1 });
+  const [currentCoords, setCurrentCoords] = useState(null);
+
+  useEffect(() => {
+    if (!navigator?.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCurrentCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  }, []);
 
   useEffect(() => {
     if (!deliveryPhotoFile) {
@@ -184,6 +221,9 @@ export default function DriverShipmentsPage() {
     setDetailId(null);
     setDetailShipment(null);
     setDeliveryPhotoFile(null);
+    setCodCollectedAmount('');
+    setCodCollectionNotes('');
+    setCodEvidenceFiles([]);
   };
 
   const loadDetail = async (id) => {
@@ -198,6 +238,19 @@ export default function DriverShipmentsPage() {
     if (newStatus === 'DELIVERED' && !deliveryPhotoFile) {
       alert('Vui lòng chọn ảnh giao hàng trước khi xác nhận đã giao đến.');
       return;
+    }
+    const requiredCodAmount = Number(shipment?.cod_amount || 0);
+    const hasCOD = requiredCodAmount > 0;
+    if (newStatus === 'DELIVERED' && hasCOD) {
+      const collected = Number(codCollectedAmount);
+      if (!Number.isFinite(collected) || collected <= 0) {
+        alert('Đơn COD bắt buộc nhập số tiền đã thu.');
+        return;
+      }
+      if (codEvidenceFiles.length === 0) {
+        alert('Đơn COD bắt buộc có ảnh/video chứng minh thu tiền.');
+        return;
+      }
     }
     setActionLoadingId(shipment._id);
     setSuccess('');
@@ -216,11 +269,20 @@ export default function DriverShipmentsPage() {
       }
       const payload =
         newStatus === 'DELIVERED'
-          ? { status: newStatus, deliveryPhoto: fileToSend }
+          ? {
+              status: newStatus,
+              deliveryPhoto: fileToSend,
+              codAmountCollected: hasCOD ? codCollectedAmount : undefined,
+              codCollectionNotes: hasCOD ? codCollectionNotes : undefined,
+              codEvidencePhotos: hasCOD ? codEvidenceFiles : undefined,
+            }
           : newStatus;
       const res = await workflowService.updateShipmentStatus(shipment._id, payload);
       if (res.success) {
         if (newStatus === 'DELIVERED') {
+          setCodCollectedAmount('');
+          setCodCollectionNotes('');
+          setCodEvidenceFiles([]);
           if (!routeId) {
             const myRoutesRes = await workflowService.getMyDeliveryRoutes({ limit: 50 });
             const myRoutes = Array.isArray(myRoutesRes?.data) ? myRoutesRes.data : Array.isArray(myRoutesRes?.data?.data) ? myRoutesRes.data.data : getList(myRoutesRes);
@@ -430,6 +492,16 @@ export default function DriverShipmentsPage() {
                   <MapPin className='h-4 w-4 flex-shrink-0 text-slate-400' />
                   <span>Đến: {getLocationLabel(sh.to_location_id)}</span>
                 </div>
+                {sh?.to_location_id?.coordinates?.latitude && sh?.to_location_id?.coordinates?.longitude && (
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${sh.to_location_id.coordinates.latitude},${sh.to_location_id.coordinates.longitude}`}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800'
+                  >
+                    <Navigation className='h-3.5 w-3.5' /> Mở Google Maps
+                  </a>
+                )}
                 <div className='text-slate-500'>
                   Ngày giao: {sh.ship_date ? new Date(sh.ship_date).toLocaleString('vi-VN') : '-'}
                 </div>
@@ -475,6 +547,47 @@ export default function DriverShipmentsPage() {
             {!detailShipment && <p className='text-sm text-slate-500'>Đang tải...</p>}
             {detailShipment && (
               <div className='space-y-4'>
+                {(() => {
+                  const dLat = toNumber(detailShipment?.to_location_id?.coordinates?.latitude);
+                  const dLng = toNumber(detailShipment?.to_location_id?.coordinates?.longitude);
+                  if (dLat == null || dLng == null) return null;
+                  const destination = `${dLat},${dLng}`;
+                  const origin = currentCoords ? `${currentCoords.lat},${currentCoords.lng}` : null;
+                  const mapSrc = origin
+                    ? `https://www.google.com/maps?q=${encodeURIComponent(origin)}&z=14&output=embed`
+                    : `https://www.google.com/maps?q=${encodeURIComponent(destination)}&z=15&output=embed`;
+                  const distanceKm = currentCoords
+                    ? calculateDistanceKm(currentCoords.lat, currentCoords.lng, dLat, dLng)
+                    : null;
+                  return (
+                    <div className='rounded-lg border border-indigo-200 bg-indigo-50/60 p-3'>
+                      <div className='mb-2 flex items-center justify-between'>
+                        <p className='text-xs font-semibold uppercase tracking-wide text-indigo-700'>
+                          Bản đồ điểm giao
+                        </p>
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1${origin ? `&origin=${encodeURIComponent(origin)}` : ''}&destination=${encodeURIComponent(destination)}`}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='text-xs font-medium text-indigo-700 hover:text-indigo-900'
+                        >
+                          Mở chỉ đường
+                        </a>
+                      </div>
+                      <iframe
+                        title='Delivery location map'
+                        src={mapSrc}
+                        className='h-56 w-full rounded-lg border border-indigo-100'
+                        loading='lazy'
+                        referrerPolicy='no-referrer-when-downgrade'
+                      />
+                      <p className='mt-2 text-xs text-indigo-700'>
+                        Tọa độ giao: {destination}
+                        {distanceKm != null ? ` • Khoảng cách ước tính từ vị trí hiện tại: ${distanceKm.toFixed(2)} km` : ''}
+                      </p>
+                    </div>
+                  );
+                })()}
                 <div className='rounded-lg border border-slate-200 bg-slate-50/50 p-3'>
                   <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
                     <span className='text-slate-500'>Số lô giao:</span>
@@ -566,6 +679,38 @@ export default function DriverShipmentsPage() {
                         <div className='rounded-lg border border-emerald-200 bg-white p-2'>
                           <p className='mb-1 text-xs font-medium text-emerald-700'>Preview ảnh trước khi gửi</p>
                           <img src={previewPhotoUrl} alt='Preview giao hàng' className='max-w-[200px] rounded border border-slate-200 object-cover' />
+                        </div>
+                      )}
+                      {Number(detailShipment?.cod_amount || 0) > 0 && (
+                        <div className='w-full rounded-lg border border-amber-200 bg-amber-50 p-3'>
+                          <p className='mb-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-800'>
+                            <Wallet className='h-3.5 w-3.5' /> Đơn COD: nhập số tiền đã thu
+                          </p>
+                          <div className='grid gap-2 sm:grid-cols-2'>
+                            <input
+                              type='number'
+                              min='0'
+                              step='1000'
+                              placeholder={`Số tiền đã thu (dự kiến ${Number(detailShipment.cod_amount || 0).toLocaleString('vi-VN')} đ)`}
+                              value={codCollectedAmount}
+                              onChange={e => setCodCollectedAmount(e.target.value)}
+                              className='rounded border border-amber-200 bg-white px-2 py-1.5 text-sm'
+                            />
+                            <input
+                              type='file'
+                              multiple
+                              accept='image/*,video/*'
+                              onChange={e => setCodEvidenceFiles(Array.from(e.target.files || []).slice(0, 3))}
+                              className='rounded border border-amber-200 bg-white px-2 py-1.5 text-xs'
+                            />
+                          </div>
+                          <textarea
+                            rows={2}
+                            placeholder='Ghi chú thu tiền COD (nếu có)'
+                            value={codCollectionNotes}
+                            onChange={e => setCodCollectionNotes(e.target.value)}
+                            className='mt-2 w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-xs'
+                          />
                         </div>
                       )}
                       <button

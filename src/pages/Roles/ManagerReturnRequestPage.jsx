@@ -117,7 +117,7 @@ export default function ManagerReturnRequestPage() {
     setActionLoadingId(ret._id);
     setSuccess('');
     try {
-      const res = await workflowService.updateReturnRequestStatus(ret._id, { status: 'APPROVED' });
+      const res = await workflowService.reviewReturnRequest(ret._id, { action: 'APPROVE' });
       if (res.success) {
         setSuccess(`Đã phê duyệt yêu cầu ${ret.return_no || ret._id}.`);
         await loadDetail(ret._id);
@@ -135,8 +135,8 @@ export default function ManagerReturnRequestPage() {
     setActionLoadingId(ret._id);
     setSuccess('');
     try {
-      const res = await workflowService.updateReturnRequestStatus(ret._id, {
-        status: 'REJECTED',
+      const res = await workflowService.reviewReturnRequest(ret._id, {
+        action: 'REJECT',
         rejection_reason: rejectNotes,
       });
       if (res.success) {
@@ -378,6 +378,29 @@ export default function ManagerReturnRequestPage() {
                     )}
                   </div>
                 </div>
+
+                {Array.isArray(detailReturn.evidence_photos) && detailReturn.evidence_photos.length > 0 && (
+                  <div className='rounded-lg border border-amber-200 bg-amber-50/60 p-3'>
+                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800'>Bằng chứng từ cửa hàng</h3>
+                    <div className='flex flex-wrap gap-2'>
+                      {detailReturn.evidence_photos.map((f, idx) => {
+                        const url = typeof f === 'string' ? f : (f?.url || f?.secure_url || '');
+                        if (!url) return null;
+                        return (
+                          <a
+                            key={idx}
+                            href={url}
+                            target='_blank'
+                            rel='noreferrer'
+                            className='rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-100'
+                          >
+                            Evidence {idx + 1}
+                          </a>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Lines */}
                 <div>

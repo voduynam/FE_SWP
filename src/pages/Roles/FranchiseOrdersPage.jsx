@@ -81,11 +81,15 @@ export default function FranchiseOrdersPage() {
   const [receiveLines, setReceiveLines] = useState([]);
   const [receiveLoading, setReceiveLoading] = useState(false);
   const [receiveError, setReceiveError] = useState('');
+  const [receiptStatus, setReceiptStatus] = useState('RECEIVED_OK');
+  const [receiptNotes, setReceiptNotes] = useState('');
+  const [deliveryDiscrepancy, setDeliveryDiscrepancy] = useState('');
+  const [receiptEvidenceFiles, setReceiptEvidenceFiles] = useState([]);
 
   const [newOrder, setNewOrder] = useState({
     order_date: getLocalDateTimeString(),
     is_urgent: false,
-    payment_type: 'BANK_TRANSFER',
+    payment_type: 'COD',
     lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
   });
 
@@ -142,7 +146,7 @@ export default function FranchiseOrdersPage() {
       setNewOrder(prev => ({
         ...prev,
         order_date: getLocalDateTimeString(),
-        payment_type: 'BANK_TRANSFER',
+        payment_type: 'COD',
       }));
     }
   }, [createOpen]);
@@ -242,6 +246,7 @@ export default function FranchiseOrdersPage() {
       store_org_unit_id: user?.org_unit_id || undefined,
       order_date: orderDateISO,
       is_urgent: Boolean(newOrder.is_urgent),
+      payment_method: newOrder.payment_type === 'COD' ? 'COD' : 'ONLINE',
       lines,
     };
     return { error: null, body };
@@ -268,7 +273,7 @@ export default function FranchiseOrdersPage() {
     setExistingOrderForPayment(null);
     setPendingOrderBody(body);
     setPendingOrderTotal(estimatedTotal);
-    setNewOrder(prev => ({ ...prev, payment_type: 'BANK_TRANSFER' }));
+    setNewOrder(prev => ({ ...prev, payment_type: 'COD' }));
     setCreateOpen(false);
     setConfirmOpen(true);
   };
@@ -353,9 +358,23 @@ export default function FranchiseOrdersPage() {
       const orderNo = createdOrder?.order_no || orderId;
       const orderAmount = createdOrder?.total_amount;
 
-      const paymentType = newOrder.payment_type || 'BANK_TRANSFER';
-
-      await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
+      const paymentType = newOrder.payment_type || 'COD';
+      if (paymentType === 'BANK_TRANSFER') {
+        await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
+      } else {
+        setSuccess(`Đã đặt hàng COD cho đơn ${orderNo}. Driver sẽ thu tiền khi giao hàng.`);
+        setConfirmOpen(false);
+        setCreateOpen(false);
+        setExistingOrderForPayment(null);
+        setNewOrder({
+          order_date: getLocalDateTimeString(),
+          is_urgent: false,
+          payment_type: 'COD',
+          lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
+        });
+        setPendingOrderBody(null);
+        setPendingOrderTotal(0);
+      }
       setCreateError('');
       loadOrders(1).catch(() => { /* danh sách sẽ cập nhật khi user tự refresh */ });
     } catch (err) {
@@ -387,6 +406,7 @@ export default function FranchiseOrdersPage() {
       setNewOrder({
         order_date: getLocalDateTimeString(),
         is_urgent: false,
+        payment_type: 'COD',
         lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
       });
       setSuccess('Đã lưu nháp. Vào Chi tiết đơn và bấm "Gửi đơn" khi sẵn sàng gửi lên bếp trung tâm.');
@@ -430,8 +450,7 @@ export default function FranchiseOrdersPage() {
           ? new Date(fullOrder.order_date).toISOString().slice(0, 16)
           : getLocalDateTimeString(),
         is_urgent: !!fullOrder.is_urgent,
-        // Staff luôn sử dụng thanh toán chuyển khoản
-        payment_type: 'BANK_TRANSFER',
+        payment_type: fullOrder.payment_method === 'ONLINE' ? 'BANK_TRANSFER' : 'COD',
         lines: mappedLines.length
           ? mappedLines
           : prev.lines,
@@ -480,20 +499,15 @@ export default function FranchiseOrdersPage() {
     return line.item_id;
   };
 
-  const handleReceiveLineChange = (idx, field, value) => {
-    const num = field === 'qty_received' || field === 'qty_rejected' ? Number(value) || 0 : value;
-    setReceiveLines(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], [field]: num };
-      return next;
-    });
-  };
-
   const openReceiveModal = async order => {
     setReceiveError('');
     setReceiveOrder(order);
     setReceiveShipment(null);
     setReceiveLines([]);
+    setReceiptStatus('RECEIVED_OK');
+    setReceiptNotes('');
+    setDeliveryDiscrepancy('');
+    setReceiptEvidenceFiles([]);
     setReceiveOpen(true);
     setReceiveLoading(true);
     try {
@@ -570,65 +584,17 @@ export default function FranchiseOrdersPage() {
     setReceiveLoading(true);
     setReceiveError('');
     try {
-      if (!receiveLines.length) {
-        setReceiveError('Không có dòng hàng để nhận.');
+      const needEvidence = receiptStatus === 'RECEIVED_WITH_ISSUES' || receiptStatus === 'NOT_RECEIVED';
+      if (needEvidence && receiptEvidenceFiles.length === 0) {
+        setReceiveError('Vui lòng tải lên ảnh/video bằng chứng khi có sự cố hoặc chưa nhận hàng.');
         setReceiveLoading(false);
         return;
       }
-
-      const payload = {
-        shipment_id: receiveShipment._id,
-        received_date: new Date().toISOString(),
-        lines: receiveLines
-          .filter(l => l.shipment_line_id && l.item_id)
-          .map(l => ({
-            shipment_line_id: l.shipment_line_id,
-            item_id: l.item_id,
-            qty_received: Math.max(0, Number(l.qty_received) || 0),
-            qty_rejected: Math.max(0, Number(l.qty_rejected) || 0),
-          })),
-      };
-
-      if (!payload.lines.length) {
-        setReceiveError('Mỗi dòng phải có ít nhất số lượng nhận hoặc từ chối > 0.');
-        setReceiveLoading(false);
-        return;
-      }
-
-      const invalidLine = payload.lines.find(l => l.qty_received + l.qty_rejected <= 0);
-      if (invalidLine) {
-        setReceiveError('Mỗi dòng phải có ít nhất số lượng nhận hoặc từ chối > 0.');
-        setReceiveLoading(false);
-        return;
-      }
-
-      const sumMismatch = payload.lines.some((l, idx) => {
-        const qtyShip = receiveLines[idx]?.qty_ship ?? 0;
-        return l.qty_received + l.qty_rejected !== qtyShip;
-      });
-      if (sumMismatch) {
-        setReceiveError('Tổng SL nhận + từ chối phải đúng bằng SL giao cho từng dòng.');
-        setReceiveLoading(false);
-        return;
-      }
-
-      const createRes = await workflowService.createGoodsReceipt(payload);
-      if (!createRes.success || !createRes.data) {
-        setReceiveError(createRes.message || 'Tạo phiếu nhận hàng thất bại.');
-        setReceiveLoading(false);
-        return;
-      }
-
-      const receipt = createRes.data;
-      const receiptId = receipt._id;
-      if (!receiptId) {
-        setReceiveError('Không nhận được mã phiếu nhận hàng từ server.');
-        setReceiveLoading(false);
-        return;
-      }
-
-      const confirmRes = await workflowService.confirmGoodsReceipt(receiptId, {
-        status: 'RECEIVED',
+      const confirmRes = await workflowService.confirmShipmentReceipt(receiveShipment._id, {
+        receipt_status: receiptStatus,
+        receipt_notes: receiptNotes,
+        delivery_discrepancy: deliveryDiscrepancy,
+        evidence_photos: receiptEvidenceFiles,
       });
       if (!confirmRes.success) {
         setReceiveError(confirmRes.message || 'Xác nhận nhận hàng thất bại.');
@@ -636,11 +602,19 @@ export default function FranchiseOrdersPage() {
         return;
       }
 
-      setSuccess(`Đã nhận hàng cho đơn ${receiveOrder.order_no || receiveOrder._id}.`);
+      setSuccess(
+        receiptStatus === 'NOT_RECEIVED'
+          ? `Đã báo CHƯA nhận hàng cho đơn ${receiveOrder.order_no || receiveOrder._id}. Manager sẽ xử lý.`
+          : `Đã xác nhận nhận hàng cho đơn ${receiveOrder.order_no || receiveOrder._id}.`
+      );
       setReceiveOpen(false);
       setReceiveOrder(null);
       setReceiveShipment(null);
       setReceiveLines([]);
+      setReceiptStatus('RECEIVED_OK');
+      setReceiptNotes('');
+      setDeliveryDiscrepancy('');
+      setReceiptEvidenceFiles([]);
       await loadOrders(pagination.page);
     } catch (err) {
       console.error(err);
@@ -1083,13 +1057,28 @@ export default function FranchiseOrdersPage() {
 
               <div>
                 <span className='block text-sm font-medium text-slate-700 mb-1'>Hình thức thanh toán</span>
-                <div className='inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700'>
-                  <span className='w-2 h-2 rounded-full bg-emerald-500' />
-                  <span>Chỉ hỗ trợ thanh toán chuyển khoản (PayOS)</span>
+                <div className='mt-2 grid gap-2 sm:grid-cols-2'>
+                  <label className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700'>
+                    <input
+                      type='radio'
+                      name='paymentType'
+                      value='COD'
+                      checked={newOrder.payment_type === 'COD'}
+                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
+                    />
+                    Tiền mặt khi nhận hàng (COD)
+                  </label>
+                  <label className='inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700'>
+                    <input
+                      type='radio'
+                      name='paymentType'
+                      value='BANK_TRANSFER'
+                      checked={newOrder.payment_type === 'BANK_TRANSFER'}
+                      onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
+                    />
+                    Chuyển khoản PayOS
+                  </label>
                 </div>
-                <p className='mt-1 text-xs text-slate-500'>
-                  Nhân viên cửa hàng không sử dụng tiền mặt, tất cả đơn hàng được thanh toán qua chuyển khoản PayOS.
-                </p>
               </div>
 
               <div className='flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4'>
@@ -1116,9 +1105,17 @@ export default function FranchiseOrdersPage() {
                           const orderId = existingOrderForPayment._id;
                           const orderNo = existingOrderForPayment.order_no || orderId;
                           const orderAmount = existingOrderForPayment.total_amount || 0;
-                          const paymentType = newOrder.payment_type || 'BANK_TRANSFER';
-
-                          await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
+                          const paymentType = newOrder.payment_type || 'COD';
+                          if (paymentType === 'BANK_TRANSFER') {
+                            await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
+                          } else {
+                            setSuccess(`Đã gửi đơn COD ${orderNo}. Driver sẽ thu tiền khi giao.`);
+                            setConfirmOpen(false);
+                            setCreateOpen(false);
+                            setExistingOrderForPayment(null);
+                            setPendingOrderBody(null);
+                            setPendingOrderTotal(0);
+                          }
                           setCreateError('');
                           loadOrders(1).catch(() => {});
                         } catch (err) {
@@ -1304,7 +1301,7 @@ export default function FranchiseOrdersPage() {
             <form onSubmit={submitReceive} className='space-y-4'>
               <div className='space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3'>
                 <div className='text-sm font-medium text-slate-700'>
-                  Số lượng nhận theo dòng sản phẩm
+                  Xác nhận nhận hàng theo shipment
                 </div>
                 {receiveLoading && (
                   <p className='text-xs text-slate-500'>Đang tải dữ liệu nhận hàng...</p>
@@ -1320,8 +1317,6 @@ export default function FranchiseOrdersPage() {
                       <tr>
                         <th className='px-2 py-2'>Sản phẩm</th>
                         <th className='px-2 py-2 text-right'>SL giao</th>
-                        <th className='px-2 py-2 text-right'>SL nhận</th>
-                        <th className='px-2 py-2 text-right'>SL từ chối</th>
                       </tr>
                     </thead>
                     <tbody className='divide-y divide-slate-100 bg-white'>
@@ -1334,40 +1329,51 @@ export default function FranchiseOrdersPage() {
                             )}
                           </td>
                           <td className='px-2 py-2 text-right'>{line.qty_ship}</td>
-                          <td className='px-2 py-2 text-right'>
-                            <input
-                              type='number'
-                              min={0}
-                              max={line.qty_ship}
-                              step='any'
-                              value={line.qty_received}
-                              onChange={e =>
-                                handleReceiveLineChange(idx, 'qty_received', e.target.value)
-                              }
-                              className='w-24 rounded border border-slate-200 px-2 py-1 text-xs text-right'
-                            />
-                          </td>
-                          <td className='px-2 py-2 text-right'>
-                            <input
-                              type='number'
-                              min={0}
-                              max={line.qty_ship}
-                              step='any'
-                              value={line.qty_rejected}
-                              onChange={e =>
-                                handleReceiveLineChange(idx, 'qty_rejected', e.target.value)
-                              }
-                              className='w-24 rounded border border-slate-200 px-2 py-1 text-xs text-right'
-                            />
-                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 )}
-                <p className='text-[11px] text-slate-500'>
-                  Quy tắc: với mỗi dòng, <strong>SL nhận + SL từ chối phải đúng bằng SL giao</strong>.
-                </p>
+                <div className='grid gap-2 pt-1 sm:grid-cols-2'>
+                  <div>
+                    <label className='mb-1 block text-[11px] font-medium text-slate-600'>Trạng thái nhận hàng</label>
+                    <select
+                      value={receiptStatus}
+                      onChange={e => setReceiptStatus(e.target.value)}
+                      className='w-full rounded border border-slate-200 px-2 py-1.5 text-xs'
+                    >
+                      <option value='RECEIVED_OK'>Nhận đủ, không vấn đề</option>
+                      <option value='RECEIVED_WITH_ISSUES'>Nhận nhưng có vấn đề</option>
+                      <option value='NOT_RECEIVED'>Chưa nhận được hàng</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className='mb-1 block text-[11px] font-medium text-slate-600'>Bằng chứng (ảnh/video)</label>
+                    <input
+                      type='file'
+                      multiple
+                      accept='image/*,video/*'
+                      onChange={e => setReceiptEvidenceFiles(Array.from(e.target.files || []).slice(0, 5))}
+                      className='w-full rounded border border-slate-200 px-2 py-1 text-xs'
+                    />
+                  </div>
+                </div>
+                <textarea
+                  rows={2}
+                  value={receiptNotes}
+                  onChange={e => setReceiptNotes(e.target.value)}
+                  placeholder='Ghi chú tình trạng nhận hàng'
+                  className='w-full rounded border border-slate-200 px-2 py-1.5 text-xs'
+                />
+                {(receiptStatus === 'RECEIVED_WITH_ISSUES' || receiptStatus === 'NOT_RECEIVED') && (
+                  <textarea
+                    rows={2}
+                    value={deliveryDiscrepancy}
+                    onChange={e => setDeliveryDiscrepancy(e.target.value)}
+                    placeholder='Mô tả chi tiết vấn đề/chênh lệch giao hàng'
+                    className='w-full rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs'
+                  />
+                )}
               </div>
 
               <div className='flex justify-end gap-2 border-t border-slate-200 pt-4'>
