@@ -138,9 +138,56 @@ export const workflowService = {
       const name = photo.name || `delivery_${Date.now()}.jpg`;
       formData.append('delivery_photo', photo, name);
     }
+    if (body.codAmountCollected != null && body.codAmountCollected !== '') {
+      formData.append('cod_amount_collected', body.codAmountCollected);
+    }
+    if (body.codCollectionNotes) {
+      formData.append('cod_collection_notes', body.codCollectionNotes);
+    }
+    if (Array.isArray(body.codEvidencePhotos)) {
+      body.codEvidencePhotos.forEach((file, index) => {
+        if (file instanceof File) {
+          formData.append('cod_evidence_photos', file);
+        } else if (
+          file &&
+          typeof file === 'object' &&
+          (file instanceof Blob || (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/'))))
+        ) {
+          const name = file.name || `cod_evidence_${Date.now()}_${index}.jpg`;
+          formData.append('cod_evidence_photos', file, name);
+        }
+      });
+    }
     // Content-Type: false → axios không gửi header, browser đặt multipart/form-data + boundary (bắt buộc cho upload file)
     return withResult(() =>
       axiosInstance.put(`/shipments/${id}/status`, formData, {
+        headers: { 'Content-Type': false },
+      })
+    );
+  },
+  updateShipmentCODStatus: (id, payload) =>
+    withResult(() => axiosInstance.put(`/shipments/${id}/cod-status`, payload)),
+  confirmShipmentReceipt: (id, payload) => {
+    const formData = new FormData();
+    if (payload?.receipt_status) formData.append('receipt_status', payload.receipt_status);
+    if (payload?.receipt_notes) formData.append('receipt_notes', payload.receipt_notes);
+    if (payload?.delivery_discrepancy) formData.append('delivery_discrepancy', payload.delivery_discrepancy);
+    if (Array.isArray(payload?.evidence_photos)) {
+      payload.evidence_photos.forEach((file, index) => {
+        if (file instanceof File) {
+          formData.append('evidence_photos', file);
+        } else if (
+          file &&
+          typeof file === 'object' &&
+          (file instanceof Blob || (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/'))))
+        ) {
+          const name = file.name || `receipt_evidence_${Date.now()}_${index}`;
+          formData.append('evidence_photos', file, name);
+        }
+      });
+    }
+    return withResult(() =>
+      axiosInstance.put(`/shipments/${id}/confirm-receipt`, formData, {
         headers: { 'Content-Type': false },
       })
     );
@@ -210,12 +257,44 @@ export const workflowService = {
   },
   getReturnRequest: id =>
     withResult(() => axiosInstance.get(`/return-requests/${id}`)),
-  createReturnRequest: payload =>
-    withResult(() => axiosInstance.post('/return-requests', payload)),
+  createReturnRequest: payload => {
+    if (payload instanceof FormData) {
+      return withResult(() =>
+        axiosInstance.post('/return-requests', payload, {
+          headers: { 'Content-Type': false },
+        })
+      );
+    }
+    return withResult(() => axiosInstance.post('/return-requests', payload));
+  },
   updateReturnRequestStatus: (id, payload) =>
     withResult(() => axiosInstance.put(`/return-requests/${id}/status`, payload)),
+  reviewReturnRequest: (id, payload) =>
+    withResult(() => axiosInstance.put(`/return-requests/${id}/review`, payload)),
   processReturnRequest: id =>
     withResult(() => axiosInstance.put(`/return-requests/${id}/process`)),
+
+  // Material requests
+  getMaterialRequests: params =>
+    withResult(() => axiosInstance.get('/material-requests', { params })),
+  getMaterialRequest: id =>
+    withResult(() => axiosInstance.get(`/material-requests/${id}`)),
+  createMaterialRequest: payload =>
+    withResult(() => axiosInstance.post('/material-requests', payload)),
+  reviewMaterialRequest: (id, payload) =>
+    withResult(() => axiosInstance.put(`/material-requests/${id}/review`, payload)),
+  updateMaterialRequestStatus: (id, payload) =>
+    withResult(() => axiosInstance.put(`/material-requests/${id}/status`, payload)),
+  checkMaterialRequestStock: params =>
+    withResult(() => axiosInstance.get('/material-requests/stock-check', { params })),
+
+  // Production shortage
+  getProductionVarianceCheck: id =>
+    withResult(() => axiosInstance.get(`/production-orders/${id}/variance-check`)),
+  compensateProductionShortage: (id, payload) =>
+    withResult(() => axiosInstance.post(`/production-orders/${id}/compensate`, payload)),
+  executeCompensatingProduction: id =>
+    withResult(() => axiosInstance.post(`/production-orders/${id}/execute-compensation`)),
 
   getDeliveryRoutes: params =>
     withResult(() => axiosInstance.get('/delivery-routes', { params })),
@@ -324,6 +403,12 @@ export const workflowService = {
   createItem: payload => withResult(() => axiosInstance.post('/items', payload)),
   updateItem: (id, payload) =>
     withResult(() => axiosInstance.put(`/items/${id}`, payload)),
+  updateItemCostPrice: (id, payload) =>
+    withResult(() => axiosInstance.put(`/items/${id}/cost-price`, payload)),
+  batchUpdateItemCostPrices: payload =>
+    withResult(() => axiosInstance.put('/items/batch-update-cost-prices', payload)),
+  getMaterialsWithoutCost: () =>
+    withResult(() => axiosInstance.get('/items/materials-without-cost')),
   deleteItem: id =>
     withResult(() => axiosInstance.delete(`/items/${id}`)),
   getDashboardOverview: params =>
@@ -383,6 +468,20 @@ export const workflowService = {
     withResult(() => axiosInstance.delete(`/master-data/org-units/${id}`)),
   getLocations: params =>
     withResult(() => axiosInstance.get('/master-data/locations', { params })),
+  getOrgUnitsForMap: params =>
+    withResult(() => axiosInstance.get('/locations/org-units', { params })),
+  updateOrgUnitCoordinates: (id, payload) =>
+    withResult(() => axiosInstance.put(`/locations/org-unit/${id}/coordinates`, payload)),
+  getGoogleMapsLinks: params =>
+    withResult(() => axiosInstance.get('/locations/google-maps-links', { params })),
+  geocodeAddress: params =>
+    withResult(() => axiosInstance.get('/locations/geocode', { params })),
+  getNearbyLocations: params =>
+    withResult(() => axiosInstance.get('/locations/nearby', { params })),
+  getOptimizedDeliveryRoute: id =>
+    withResult(() => axiosInstance.get(`/locations/delivery-route/${id}`)),
+  setCurrentLocation: payload =>
+    withResult(() => axiosInstance.post('/locations/current-location', payload)),
   // NOTE: endpoint `/master-data/seed-store-locations` does not exist in BE.
   // Keep this method to avoid breaking FE flows; we just load active locations.
   seedStoreLocations: async () => {

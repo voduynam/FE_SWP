@@ -63,6 +63,7 @@ export default function CentralShipmentsPage() {
     ? user.roles.map(r => String(r.code || '').toUpperCase())
     : [];
   const isSupplyCoordinator = roleCodes.includes('SUPPLY_COORDINATOR');
+  const canConfirmCOD = roleCodes.includes('MANAGER') || roleCodes.includes('ADMIN');
   const canManageShipments = isSupplyCoordinator;
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -132,7 +133,8 @@ export default function CentralShipmentsPage() {
           const id = po?.internal_order_id ?? po?.order_id;
           if (id) ids.add(String(id));
         });
-      } catch (_) {
+      } catch (error) {
+        void error;
         // Bỏ qua nếu parse production orders lỗi
       }
       setDoneProductionOrderIds(ids);
@@ -226,6 +228,38 @@ export default function CentralShipmentsPage() {
     }
   };
 
+  const handleManagerCODReview = async (shipment, action) => {
+    const notes = window.prompt(
+      action === 'CONFIRMED'
+        ? 'Ghi chú xác nhận COD (không bắt buộc):'
+        : 'Nhập lý do tranh chấp COD:'
+    );
+    if (action === 'DISPUTED' && !notes?.trim()) return;
+    setActionLoadingId(shipment._id);
+    setSuccess('');
+    try {
+      const res = await workflowService.updateShipmentCODStatus(shipment._id, {
+        action,
+        manager_notes: notes || '',
+      });
+      if (res.success) {
+        setSuccess(
+          action === 'CONFIRMED'
+            ? 'Manager đã xác nhận số tiền COD.'
+            : 'Manager đã đánh dấu COD có tranh chấp.'
+        );
+        await loadDetail(shipment._id);
+        loadShipments(pagination.page);
+      } else {
+        alert(res.message || 'Không thể cập nhật xác nhận COD');
+      }
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Không thể cập nhật xác nhận COD');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
   /* ─── Search / filter ─── */
   const filteredShipments = useMemo(() => {
     const list = Array.isArray(shipments) ? shipments : [];
@@ -285,7 +319,8 @@ export default function CentralShipmentsPage() {
           const shipData = shipmentsRes?.data?.data ?? shipmentsRes?.data ?? [];
           const shipList = Array.isArray(shipData) ? shipData : [];
           orderIdsWithShipment = new Set(shipList.map(s => String(s?.order_id?._id ?? s?.order_id)).filter(Boolean));
-        } catch (_) {
+        } catch (error) {
+          void error;
           // Bỏ qua nếu parse shipments lỗi
         }
         const ordersWithoutShipment = combinedOrders.filter(o => !orderIdsWithShipment.has(String(o._id)));
@@ -314,7 +349,8 @@ export default function CentralShipmentsPage() {
                 },
               ];
             }
-          } catch (_) {
+          } catch (error) {
+            void error;
             // ignore
           }
         }
@@ -595,7 +631,8 @@ export default function CentralShipmentsPage() {
           } else {
             setSuccess('Đã tạo lô giao hàng thành công (Nháp). Hoàn thành sản xuất đơn này thì phiếu sẽ chuyển "Đã có hàng".');
           }
-        } catch (_) {
+        } catch (error) {
+          void error;
           setSuccess('Đã tạo lô giao hàng thành công.');
         }
       } else {
@@ -805,7 +842,6 @@ export default function CentralShipmentsPage() {
                       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4'>
                         {!imageError && (
                           <div className='overflow-hidden rounded-lg border border-emerald-100 bg-white max-w-xs'>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={photoUrl}
                               alt='Ảnh giao hàng'
@@ -843,6 +879,40 @@ export default function CentralShipmentsPage() {
                     </div>
                   );
                 })()}
+
+                {Number(detailShipment?.cod_amount || 0) > 0 && (
+                  <div className='rounded-lg border border-amber-200 bg-amber-50/70 p-3'>
+                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800'>Thông tin COD</h3>
+                    <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
+                      <span className='text-amber-700/80'>Số tiền cần thu:</span>
+                      <span className='font-medium'>{Number(detailShipment.cod_amount || 0).toLocaleString('vi-VN')} đ</span>
+                      <span className='text-amber-700/80'>Số tiền đã thu:</span>
+                      <span className='font-medium'>{Number(detailShipment.cod_collected_amount || 0).toLocaleString('vi-VN')} đ</span>
+                      <span className='text-amber-700/80'>Trạng thái COD:</span>
+                      <span>{detailShipment.cod_status || 'PENDING'}</span>
+                    </div>
+                    {canConfirmCOD && Number(detailShipment.cod_collected_amount || 0) > 0 && !['CONFIRMED', 'DISPUTED'].includes(detailShipment.cod_status) && (
+                      <div className='mt-3 flex gap-2'>
+                        <button
+                          type='button'
+                          disabled={actionLoadingId === detailShipment._id}
+                          onClick={() => handleManagerCODReview(detailShipment, 'CONFIRMED')}
+                          className='rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
+                        >
+                          Xác nhận COD
+                        </button>
+                        <button
+                          type='button'
+                          disabled={actionLoadingId === detailShipment._id}
+                          onClick={() => handleManagerCODReview(detailShipment, 'DISPUTED')}
+                          className='rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60'
+                        >
+                          Báo tranh chấp COD
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
 
                 {/* Action buttons */}

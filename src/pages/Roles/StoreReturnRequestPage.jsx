@@ -74,6 +74,7 @@ export default function StoreReturnRequestPage() {
   const [returnLines, setReturnLines] = useState([]);
   const [returnDate, setReturnDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState('');
+  const [evidenceFiles, setEvidenceFiles] = useState([]);
 
   /* ─── Load list ─── */
   const loadReturns = async (page = 1) => {
@@ -146,6 +147,7 @@ export default function StoreReturnRequestPage() {
     setReceiptDetail(null);
     setReturnLines([]);
     setReason('');
+    setEvidenceFiles([]);
     const load = async () => {
       const res = await workflowService.getGoodsReceipts({ status: 'RECEIVED', limit: 100 });
       const raw = getList(res);
@@ -283,15 +285,23 @@ export default function StoreReturnRequestPage() {
         return;
       }
 
-      const payload = {
-        goods_receipt_id: selectedReceiptId,
-        return_date: returnDate || new Date().toISOString(),
-        reason: reason || '',
-        lines: linesToSend,
-        // Không gửi store_org_unit_id - để BE dùng req.user.org_unit_id, đảm bảo user thấy return mới trong danh sách
-      };
+      if (evidenceFiles.length === 0) {
+        setCreateError('Vui lòng tải lên ít nhất 1 ảnh/video bằng chứng.');
+        setCreating(false);
+        return;
+      }
 
-      const res = await workflowService.createReturnRequest(payload);
+      const formData = new FormData();
+      formData.append('goods_receipt_id', selectedReceiptId);
+      formData.append('return_date', returnDate || new Date().toISOString());
+      formData.append('reason', reason || '');
+      formData.append('lines', JSON.stringify(linesToSend));
+      evidenceFiles.forEach(file => {
+        if (file instanceof File) {
+          formData.append('evidence_photos', file);
+        }
+      });
+      const res = await workflowService.createReturnRequest(formData);
       if (!res.success) {
         setCreateError(res.message || 'Tạo yêu cầu trả hàng thất bại');
         setCreating(false);
@@ -533,6 +543,19 @@ export default function StoreReturnRequestPage() {
                   <label className='block text-sm font-medium text-slate-700'>Lý do chung</label>
                   <input type='text' value={reason} onChange={e => setReason(e.target.value)} placeholder='VD: Hàng bị hư hỏng trong quá trình vận chuyển' className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm' />
                 </div>
+              </div>
+              <div>
+                <label className='block text-sm font-medium text-slate-700'>Bằng chứng (ảnh/video)</label>
+                <input
+                  type='file'
+                  multiple
+                  accept='image/*,video/*'
+                  onChange={e => setEvidenceFiles(Array.from(e.target.files || []).slice(0, 5))}
+                  className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+                />
+                <p className='mt-1 text-xs text-slate-500'>
+                  Bắt buộc có bằng chứng. Tối đa 5 file.
+                </p>
               </div>
 
               {receiptLoading && <p className='text-sm text-slate-500'>Đang tải chi tiết phiếu nhận...</p>}

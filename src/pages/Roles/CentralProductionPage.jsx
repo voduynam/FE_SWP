@@ -65,6 +65,9 @@ export default function CentralProductionPage() {
   const [consumptionWarning, setConsumptionWarning] = useState(null);
   const [consumptionPendingData, setConsumptionPendingData] = useState(null);
   const [showOutput, setShowOutput] = useState(false);
+  const [checkingVariance, setCheckingVariance] = useState(false);
+  const [varianceInfo, setVarianceInfo] = useState(null);
+  const [creatingCompensation, setCreatingCompensation] = useState(false);
   const [showCreateLotOutput, setShowCreateLotOutput] = useState(false);
   const [newLotForm, setNewLotForm] = useState({ lot_code: '', mfg_date: '', exp_date: '' });
   const [newLotSaving, setNewLotSaving] = useState(false);
@@ -334,6 +337,76 @@ export default function CentralProductionPage() {
       alert(err?.response?.data?.message || 'Cập nhật thất bại');
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  const getShortageItems = (variancePayload) => {
+    const d = variancePayload?.data ?? variancePayload ?? {};
+    const raw =
+      d.shortage_items ||
+      d.shortageItems ||
+      d.missing_items ||
+      d.variance_items ||
+      [];
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map(it => ({
+        item_id: it.item_id?._id || it.item_id,
+        shortage_qty: Number(it.shortage_qty ?? it.missing_qty ?? it.variance_qty ?? 0),
+      }))
+      .filter(it => it.item_id && it.shortage_qty > 0);
+  };
+
+  const handleVarianceCheck = async () => {
+    if (!detailOrder?._id) return;
+    setCheckingVariance(true);
+    setVarianceInfo(null);
+    try {
+      const res = await workflowService.getProductionVarianceCheck(detailOrder._id);
+      if (res.success) setVarianceInfo(res.data);
+      else alert(res.message || 'Không kiểm tra được thiếu hụt');
+    } finally {
+      setCheckingVariance(false);
+    }
+  };
+
+  const handleCompensateShortage = async () => {
+    if (!detailOrder?._id || !varianceInfo) return;
+    const shortageItems = getShortageItems(varianceInfo);
+    if (!shortageItems.length) {
+      alert('Không có thiếu hụt cần bù.');
+      return;
+    }
+    setCreatingCompensation(true);
+    try {
+      const res = await workflowService.compensateProductionShortage(detailOrder._id, {
+        shortage_items: shortageItems,
+        reason: 'Thiếu hụt trong quá trình sản xuất',
+        priority: 'URGENT',
+      });
+      if (!res.success) {
+        alert(res.message || 'Tạo đơn bù thất bại');
+        return;
+      }
+      // Gửi material request nhanh nếu đơn bù phát sinh thiếu nguyên liệu.
+      await workflowService.createMaterialRequest({
+        priority: 'URGENT',
+        request_reason: 'PRODUCTION_SHORTAGE',
+        production_order_id: detailOrder._id,
+        notes: 'Yêu cầu bổ sung nguyên liệu do thiếu hụt sản xuất.',
+        lines: shortageItems.map(s => ({
+          item_id: s.item_id,
+          quantity_requested: s.shortage_qty,
+          urgency_level: 'CRITICAL',
+          reason: 'Bù thiếu hụt sản xuất',
+        })),
+      });
+      setSuccess('Đã tạo đơn sản xuất bù thiếu hụt và gửi yêu cầu nguyên liệu nhanh cho Manager.');
+      await loadOrders(pagination.page);
+    } catch (error) {
+      alert(error?.response?.data?.message || 'Không thể xử lý bù thiếu hụt');
+    } finally {
+      setCreatingCompensation(false);
     }
   };
 
@@ -800,7 +873,29 @@ export default function CentralProductionPage() {
                         >
                           Bước 5: Hoàn thành sản xuất
                         </button>
+                        <button
+                          type='button'
+                          onClick={handleVarianceCheck}
+                          disabled={checkingVariance}
+                          className='rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-700 hover:bg-amber-100 disabled:opacity-60'
+                        >
+                          {checkingVariance ? 'Đang kiểm tra...' : 'Kiểm tra thiếu hụt'}
+                        </button>
                       </div>
+                      {varianceInfo && (
+                        <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800'>
+                          <p className='font-semibold'>Kết quả kiểm tra thiếu hụt đã cập nhật.</p>
+                          <p className='mt-1'>Nếu có thiếu hụt, bấm tạo đơn bù để Chef sản xuất bổ sung.</p>
+                          <button
+                            type='button'
+                            onClick={handleCompensateShortage}
+                            disabled={creatingCompensation}
+                            className='mt-2 rounded bg-amber-600 px-3 py-1.5 text-white hover:bg-amber-700 disabled:opacity-60'
+                          >
+                            {creatingCompensation ? 'Đang tạo đơn bù...' : 'Tạo đơn bù thiếu hụt'}
+                          </button>
+                        </div>
+                      )}
                       {!canComplete && (
                         <p className='text-xs text-amber-600'>
                           Chưa thể hoàn thành — cần ghi nhận: {missing.join(' và ')}.
