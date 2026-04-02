@@ -3,17 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Eye, EyeOff, Lock, User } from 'lucide-react';
 import BrandLogo from '../../components/BrandLogo';
 import { useAuth } from '../../contexts/AuthContext';
+import { getDefaultAppPathForUser } from '../../utils/defaultAppRoute';
 import trungThuHero from '../../assets/image/trung thu.png';
-
-// Mapping role -> route
-const roleRoutes = {
-  admin: '/app/admin/dashboard',
-  manager: '/app/manager/dashboard',
-  'central-kitchen': '/app/central/dashboard',
-  'supply-coordinator': '/app/supply/dashboard',
-  'franchise-staff': '/app/store/dashboard',
-  driver: '/app/driver/dashboard',
-};
 
 const REMEMBER_USERNAME_KEY = 'ck_login_remember_username';
 
@@ -68,23 +59,7 @@ export default function Login() {
       /* ignore */
     }
 
-    let userRole = result.user?.role;
-
-    if (!userRole && result.user?.roles?.[0]?.code) {
-      const roleCode = result.user.roles[0].code.toLowerCase();
-      const roleCodeMap = {
-        admin: 'admin',
-        manager: 'manager',
-        central_kitchen_staff: 'central-kitchen',
-        supply_coordinator: 'supply-coordinator',
-        franchise_store_staff: 'franchise-staff',
-        driver: 'driver',
-      };
-      userRole = roleCodeMap[roleCode] || roleCode.replace(/_/g, '-');
-    }
-
-    const route = roleRoutes[userRole] || '/app/dashboard';
-    navigate(route);
+    navigate(getDefaultAppPathForUser(result.user));
   };
 
   return (

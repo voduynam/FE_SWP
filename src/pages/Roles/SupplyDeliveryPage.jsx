@@ -194,7 +194,7 @@ export default function SupplyDeliveryPage() {
         setSuccess('Tuyến giao đã hoàn thành.');
         await loadDetail(detailRoute._id);
       } else {
-        alert(res.message || 'Hoàn thành tuyến thất bại');
+        await appAlert(res.message || 'Hoàn thành tuyến thất bại');
       }
     } finally {
       setActionLoading(false);
@@ -210,7 +210,7 @@ export default function SupplyDeliveryPage() {
         setSuccess('Tuyến giao đã hủy.');
         await loadDetail(detailRoute._id);
       } else {
-        alert(res.message || 'Hủy tuyến thất bại');
+        await appAlert(res.message || 'Hủy tuyến thất bại');
       }
     } finally {
       setActionLoading(false);
@@ -238,7 +238,7 @@ export default function SupplyDeliveryPage() {
         }
         await loadDetail(detailRoute._id);
       } else {
-        alert(res.message || 'Cập nhật điểm dừng thất bại');
+        await appAlert(res.message || 'Cập nhật điểm dừng thất bại');
       }
     } finally {
       setActionLoading(false);
@@ -370,7 +370,8 @@ export default function SupplyDeliveryPage() {
         return;
       }
 
-      setCreateOpen(false);
+      // Phải xóa ?shipmentId= khỏi URL — nếu không useEffect sẽ coi createOpen=false + vẫn có shipmentId là tín hiệu mở lại modal.
+      closeCreateModal({ clearQuery: true });
       setSuccess('Đã tạo tuyến giao hàng thành công.');
       loadRoutes(1);
     } catch (err) {

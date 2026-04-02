@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
 const RETURN_STATUS = {
   PENDING: 'Chờ duyệt',
@@ -49,6 +51,10 @@ function getList(res) {
 }
 
 export default function StoreReturnRequestPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pendingReceiptIdRef = useRef(null);
+  const prefillFromDamageRef = useRef(false);
+
   const [returns, setReturns] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [loading, setLoading] = useState(false);
@@ -75,6 +81,30 @@ export default function StoreReturnRequestPage() {
   const [returnDate, setReturnDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState('');
   const [evidenceFiles, setEvidenceFiles] = useState([]);
+  const [evidencePreviewUrls, setEvidencePreviewUrls] = useState([]);
+
+  useEffect(() => {
+    const urls = (evidenceFiles || []).map(f => URL.createObjectURL(f));
+    setEvidencePreviewUrls(urls);
+    return () => urls.forEach(u => URL.revokeObjectURL(u));
+  }, [evidenceFiles]);
+
+  /* Mở form tạo trả hàng từ Đơn hàng (nhận hàng hư → query ?create=1&goodsReceiptId=&fromDamage=1) */
+  useEffect(() => {
+    if (searchParams.get('create') !== '1') return;
+    const gr = searchParams.get('goodsReceiptId');
+    const fd = searchParams.get('fromDamage') === '1';
+    if (gr) pendingReceiptIdRef.current = gr;
+    if (fd) prefillFromDamageRef.current = true;
+    setCreateOpen(true);
+    setSearchParams(prev => {
+      const n = new URLSearchParams(prev);
+      n.delete('create');
+      n.delete('goodsReceiptId');
+      n.delete('fromDamage');
+      return n;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   /* ─── Load list ─── */
   const loadReturns = async (page = 1) => {
@@ -168,6 +198,22 @@ export default function StoreReturnRequestPage() {
     load();
   }, [createOpen]);
 
+  /* Chọn phiếu nhận khi vừa điều hướng từ màn Nhận hàng (hàng hư) */
+  useEffect(() => {
+    if (!createOpen || receipts.length === 0 || !pendingReceiptIdRef.current) return;
+    const id = pendingReceiptIdRef.current;
+    const exists = receipts.some(r => r._id === id);
+    if (exists) {
+      setSelectedReceiptId(id);
+      pendingReceiptIdRef.current = null;
+    } else {
+      setCreateError(
+        'Không thấy phiếu nhận trong danh sách (có thể cần làm mới trang). Chọn phiếu thủ công trong danh sách.'
+      );
+      pendingReceiptIdRef.current = null;
+    }
+  }, [createOpen, receipts]);
+
   /* ─── When receipt selected → load detail + items + store_org_unit_id from shipment ─── */
   useEffect(() => {
     if (!selectedReceiptId) {
@@ -211,6 +257,9 @@ export default function StoreReturnRequestPage() {
         allItems.forEach(it => { itemMap[it._id] = it; });
       }
 
+      const defaultDefect = prefillFromDamageRef.current ? 'DAMAGED' : 'OTHER';
+      if (prefillFromDamageRef.current) prefillFromDamageRef.current = false;
+
       const lines = (receipt.lines || []).map(l => {
         const itemId = l.item_id?._id || l.item_id;
         const item = itemMap[itemId] || l.item_id || {};
@@ -227,7 +276,7 @@ export default function StoreReturnRequestPage() {
           lot_code: l.lot_id?.lot_code || '',
           qty_received: l.qty_received || 0,
           qty_return: 0,
-          defect_type: 'OTHER',
+          defect_type: defaultDefect,
           disposition: 'RESTOCK',
           notes: '',
         };
@@ -262,7 +311,7 @@ export default function StoreReturnRequestPage() {
           ...(l.lot_id ? { lot_id: l.lot_id } : {}),
           defect_type: l.defect_type || 'OTHER',
           disposition: l.disposition || 'RESTOCK',
-          notes: l.notes || '',
+          reason: (l.notes || '').trim(),
         }));
 
       if (!linesToSend.length) {
@@ -337,7 +386,7 @@ export default function StoreReturnRequestPage() {
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Trả hàng</h1>
           <p className='mt-1 text-sm text-slate-500'>
-            Tạo yêu cầu trả hàng lỗi/hết hạn cho bếp trung tâm và theo dõi trạng thái xử lý.
+            Tạo yêu cầu trả hàng kèm ảnh/video bằng chứng. Manager phê duyệt sẽ tạo đơn bù miễn phí; sau đó Manager xử lý hoàn thành để trừ tồn kho cửa hàng.
           </p>
         </div>
         <div className='flex gap-2'>
@@ -444,14 +493,64 @@ export default function StoreReturnRequestPage() {
                         <span>{detailReturn.resolution_notes}</span>
                       </>
                     )}
+                    {detailReturn.rejection_reason && (
+                      <>
+                        <span className='text-slate-500'>Lý do từ chối:</span>
+                        <span className='text-red-700'>{detailReturn.rejection_reason}</span>
+                      </>
+                    )}
+                    {detailReturn.replacement_order_id && (
+                      <>
+                        <span className='text-slate-500'>Đơn bù (miễn phí):</span>
+                        <span className='font-medium text-emerald-800'>
+                          {typeof detailReturn.replacement_order_id === 'object'
+                            ? `${detailReturn.replacement_order_id.order_no || detailReturn.replacement_order_id._id} — ${detailReturn.replacement_order_id.status || ''}`
+                            : String(detailReturn.replacement_order_id)}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
+
+                {Array.isArray(detailReturn.evidence_photos) && detailReturn.evidence_photos.length > 0 && (
+                  <div className='rounded-lg border border-amber-200 bg-amber-50/60 p-3'>
+                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800'>Bằng chứng đã gửi</h3>
+                    <div className='flex flex-wrap gap-2'>
+                      {detailReturn.evidence_photos.map((f, idx) => {
+                        const raw =
+                          typeof f === 'string'
+                            ? f
+                            : f?.photo_url || f?.url || f?.secure_url || '';
+                        const url = resolvePhotoUrl(raw);
+                        if (!url) return null;
+                        return (
+                          <a
+                            key={idx}
+                            href={url}
+                            target='_blank'
+                            rel='noreferrer'
+                            className='block overflow-hidden rounded-lg border border-amber-300 bg-white'
+                          >
+                            <img
+                              src={url}
+                              alt=''
+                              className='h-20 w-20 object-cover'
+                              onError={e => {
+                                e.target.style.display = 'none';
+                              }}
+                            />
+                          </a>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className='rounded-lg border border-slate-200 bg-white p-3'>
                   <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500'>Quy trình trả hàng</h3>
                   <ol className='space-y-1 text-sm'>
                     <li className={detailReturn.status ? 'text-slate-700' : 'text-slate-400'}>1. Tạo yêu cầu (PENDING) — Chọn phiếu nhận, sản phẩm, số lượng, lý do</li>
-                    <li className={['APPROVED', 'PROCESSING', 'COMPLETED'].includes(detailReturn.status) ? 'text-slate-700' : 'text-slate-400'}>2. Phê duyệt (APPROVED) — Manager/Admin duyệt yêu cầu</li>
+                    <li className={['APPROVED', 'PROCESSING', 'COMPLETED'].includes(detailReturn.status) ? 'text-slate-700' : 'text-slate-400'}>2. Phê duyệt (APPROVED) — Manager tạo đơn bù miễn phí</li>
                     <li className={detailReturn.status === 'COMPLETED' ? 'text-slate-700' : 'text-slate-400'}>3. Xử lý & hoàn thành (COMPLETED) — Trừ tồn kho cửa hàng</li>
                   </ol>
                 </div>
@@ -545,17 +644,59 @@ export default function StoreReturnRequestPage() {
                 </div>
               </div>
               <div>
-                <label className='block text-sm font-medium text-slate-700'>Bằng chứng (ảnh/video)</label>
-                <input
-                  type='file'
-                  multiple
-                  accept='image/*,video/*'
-                  onChange={e => setEvidenceFiles(Array.from(e.target.files || []).slice(0, 5))}
-                  className='mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
-                />
+                <label className='block text-sm font-medium text-slate-700'>Bằng chứng (ảnh — bắt buộc)</label>
+                <label
+                  className={`mt-1 flex cursor-pointer flex-col gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-xs ${evidenceFiles.length >= 5 ? 'pointer-events-none opacity-60' : ''}`}
+                >
+                  <span className='font-medium text-slate-800'>
+                    {evidenceFiles.length >= 5
+                      ? 'Đã đủ 5 ảnh'
+                      : evidenceFiles.length
+                        ? `Đã chọn ${evidenceFiles.length}/5 — bấm để thêm`
+                        : 'Chọn ảnh (JPEG/PNG/WebP/GIF, tối đa 5, có thể chọn lần lượt)'}
+                  </span>
+                  <input
+                    type='file'
+                    multiple
+                    accept='image/jpeg,image/png,image/gif,image/webp'
+                    disabled={evidenceFiles.length >= 5}
+                    onChange={e => {
+                      const picked = Array.from(e.target.files || []);
+                      e.target.value = '';
+                      if (!picked.length) return;
+                      setEvidenceFiles(prev => {
+                        const room = 5 - prev.length;
+                        if (room <= 0) return prev;
+                        return [...prev, ...picked.slice(0, room)];
+                      });
+                    }}
+                    className='text-sm file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1'
+                  />
+                </label>
                 <p className='mt-1 text-xs text-slate-500'>
-                  Bắt buộc có bằng chứng. Tối đa 5 file.
+                  Server chỉ nhận định dạng ảnh cho bằng chứng trả hàng. Có thể chọn nhiều lần để thêm từng ảnh.
                 </p>
+                {evidencePreviewUrls.length > 0 && (
+                  <div className='mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5'>
+                    {evidenceFiles.map((file, i) => {
+                      const url = evidencePreviewUrls[i];
+                      if (!url) return null;
+                      return (
+                        <div key={`${file.name}-${i}`} className='relative overflow-hidden rounded border border-slate-200'>
+                          <button
+                            type='button'
+                            onClick={() => setEvidenceFiles(prev => prev.filter((_, j) => j !== i))}
+                            className='absolute right-0.5 top-0.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900/70 text-[10px] text-white hover:bg-red-600'
+                            aria-label='Xóa'
+                          >
+                            ×
+                          </button>
+                          <img src={url} alt='' className='h-20 w-full object-cover' />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {receiptLoading && <p className='text-sm text-slate-500'>Đang tải chi tiết phiếu nhận...</p>}

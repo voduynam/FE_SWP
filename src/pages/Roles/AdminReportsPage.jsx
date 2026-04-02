@@ -116,7 +116,7 @@ export default function Reports() {
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground' />
               <input
-                className='input-field pl-9'
+                className='input-field w-full pl-9'
                 placeholder='Tìm sản phẩm...'
                 value={productQuery}
                 onChange={e => setProductQuery(e.target.value)}
@@ -146,7 +146,7 @@ export default function Reports() {
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground' />
               <input
-                className='input-field pl-9'
+                className='input-field w-full pl-9'
                 placeholder='Lọc loại metric...'
                 value={storeQuery}
                 onChange={e => setStoreQuery(e.target.value)}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, RefreshCcw, Search } from 'lucide-react';
+import { AlertCircle, Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { resolvePhotoUrl } from '../../utils/photoHelpers';
 import { useAuth } from '../../contexts/AuthContext';
@@ -34,6 +34,27 @@ function getList(res) {
   if (Array.isArray(res.data?.data)) return res.data.data;
   if (Array.isArray(res.data?.items)) return res.data.items;
   return [];
+}
+
+function getCodEvidencePhotoUrls(shipment) {
+  const raw = shipment?.cod_evidence_photos;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((e) => (typeof e === 'string' ? e : e?.url)).filter(Boolean);
+}
+
+const COD_STATUS_VI = {
+  PENDING: 'Chưa thu / chưa giao',
+  COLLECTED: 'Đã thu — chờ quản lý đối chiếu',
+  CONFIRMED: 'Quản lý đã xác nhận số tiền',
+  DISPUTED: 'Tranh chấp COD',
+};
+
+/** COD đã giao, tài xế đã báo thu — chờ quản lý xác nhận hoặc tranh chấp */
+function shipmentNeedsManagerCodConfirm(sh) {
+  if (!sh || sh.status !== 'DELIVERED') return false;
+  if (Number(sh.cod_amount || 0) <= 0) return false;
+  if (Number(sh.cod_collected_amount || 0) <= 0) return false;
+  return String(sh.cod_status || '').toUpperCase() === 'COLLECTED';
 }
 
 /** Lấy mảng org units từ response getOrgUnits (nhiều dạng: getList, .data, .data.data, .data.items) */
@@ -84,6 +105,8 @@ export default function CentralShipmentsPage() {
   const [imageError, setImageError] = useState(false);
   /** Order ids (internal_order_id) có lệnh sản xuất DONE — dùng để chỉ hiện nút "Chuyển sang Đã lấy hàng" với phiếu DRAFT đã sản xuất */
   const [doneProductionOrderIds, setDoneProductionOrderIds] = useState(() => new Set());
+  /** Số phiếu DELIVERED + COD chờ quản lý xác nhận (đếm từ API, tối đa 500 bản ghi) */
+  const [pendingCodConfirmCount, setPendingCodConfirmCount] = useState(0);
 
   // Create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -138,9 +161,25 @@ export default function CentralShipmentsPage() {
         // Bỏ qua nếu parse production orders lỗi
       }
       setDoneProductionOrderIds(ids);
+      if (canConfirmCOD) {
+        try {
+          const delRes = await workflowService.getShipmentsPaginated({
+            status: 'DELIVERED',
+            page: 1,
+            limit: 500,
+          });
+          const delList = Array.isArray(delRes?.data?.data) ? delRes.data.data : [];
+          setPendingCodConfirmCount(delList.filter(shipmentNeedsManagerCodConfirm).length);
+        } catch {
+          setPendingCodConfirmCount(0);
+        }
+      } else {
+        setPendingCodConfirmCount(0);
+      }
     } catch {
       setShipments([]);
       setDoneProductionOrderIds(new Set());
+      setPendingCodConfirmCount(0);
     } finally {
       setLoading(false);
     }
@@ -151,7 +190,7 @@ export default function CentralShipmentsPage() {
     if (s && VALID_STATUSES.includes(s) && s !== statusFilter) setStatusFilter(s);
   }, [searchParams]);
 
-  useEffect(() => { loadShipments(1); }, [statusFilter]);
+  useEffect(() => { loadShipments(1); }, [statusFilter, canConfirmCOD]);
 
   /* ─── Mở modal tạo phiếu với đơn đã chọn khi vào trang bằng link từ duyệt đơn (chỉ Supply Coordinator) ─── */
   useEffect(() => {
@@ -231,8 +270,8 @@ export default function CentralShipmentsPage() {
   const handleManagerCODReview = async (shipment, action) => {
     const notes = window.prompt(
       action === 'CONFIRMED'
-        ? 'Ghi chú xác nhận COD (không bắt buộc):'
-        : 'Nhập lý do tranh chấp COD:'
+        ? 'Ghi chú khi xác nhận số tiền đúng (không bắt buộc):'
+        : 'Nhập lý do: số tiền không khớp hoặc chứng từ không hợp lệ:'
     );
     if (action === 'DISPUTED' && !notes?.trim()) return;
     setActionLoadingId(shipment._id);
@@ -245,8 +284,8 @@ export default function CentralShipmentsPage() {
       if (res.success) {
         setSuccess(
           action === 'CONFIRMED'
-            ? 'Manager đã xác nhận số tiền COD.'
-            : 'Manager đã đánh dấu COD có tranh chấp.'
+            ? 'Đã xác nhận số tiền COD tài xế báo là đúng.'
+            : 'Đã ghi nhận tranh chấp COD.'
         );
         await loadDetail(shipment._id);
         loadShipments(pagination.page);
@@ -697,6 +736,11 @@ export default function CentralShipmentsPage() {
           <h1 className='text-2xl font-bold text-slate-900'>Giao hàng</h1>
           <p className='mt-1 text-sm text-slate-500'>
             Theo dõi trạng thái giao hàng từ các đơn hàng đã hoàn thành sản xuất.
+            {canConfirmCOD && (
+              <span className='ml-1 text-slate-600'>
+                Đơn COD đã giao cần bạn <strong className='font-medium text-amber-800'>xác nhận số tiền</strong> trong chi tiết phiếu (có nhãn vàng trên bảng).
+              </span>
+            )}
           </p>
         </div>
         <div className='flex gap-2'>
@@ -716,6 +760,28 @@ export default function CentralShipmentsPage() {
           </button>
         </div>
       </div>
+
+      {canConfirmCOD && pendingCodConfirmCount > 0 && (
+        <div className='flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between'>
+          <div className='flex items-start gap-3'>
+            <AlertCircle className='mt-0.5 h-5 w-5 shrink-0 text-amber-600' aria-hidden />
+            <div>
+              <p className='font-semibold text-amber-950'>Cần xác nhận COD</p>
+              <p className='mt-0.5 text-xs leading-relaxed text-amber-900/90'>
+                Có <strong>{pendingCodConfirmCount}</strong> phiếu giao <strong>đã hoàn thành</strong>, tài xế đã báo thu tiền — vui lòng mở chi tiết từng phiếu để{' '}
+                <strong>đối chiếu ảnh và số tiền</strong>, rồi xác nhận hoặc báo tranh chấp.
+              </p>
+            </div>
+          </div>
+          <button
+            type='button'
+            onClick={() => setStatusFilter('DELIVERED')}
+            className='shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-medium text-amber-900 hover:bg-amber-100/80'
+          >
+            Lọc &quot;Đã giao đến&quot;
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className='flex flex-col gap-3 sm:flex-row'>
@@ -740,14 +806,18 @@ export default function CentralShipmentsPage() {
               <th className='px-4 py-3'>Kho nhận</th>
               <th className='px-4 py-3'>Ngày giao</th>
               <th className='px-4 py-3'>Trạng thái</th>
+              <th className='px-4 py-3'>Nhắc quản lý</th>
               <th className='px-4 py-3 text-right'>Thao tác</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-slate-100'>
-            {loading && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
-            {!loading && !filteredShipments.length && <tr><td colSpan={7} className='px-4 py-6 text-center text-slate-400'>Chưa có lô giao hàng nào.</td></tr>}
+            {loading && <tr><td colSpan={8} className='px-4 py-6 text-center text-slate-400'>Đang tải...</td></tr>}
+            {!loading && !filteredShipments.length && <tr><td colSpan={8} className='px-4 py-6 text-center text-slate-400'>Chưa có lô giao hàng nào.</td></tr>}
             {!loading && filteredShipments.map(sh => (
-              <tr key={sh._id}>
+              <tr
+                key={sh._id}
+                className={shipmentNeedsManagerCodConfirm(sh) ? 'bg-amber-50/80' : undefined}
+              >
                 <td className='px-4 py-3 font-medium text-slate-900'>{sh.shipment_no || sh._id}</td>
                 <td className='px-4 py-3 text-slate-700'>{sh.order_id?.order_no || sh.order_id || '-'}</td>
                 <td className='px-4 py-3 text-slate-700'>{getLocationLabel(sh.from_location_id)}</td>
@@ -757,6 +827,20 @@ export default function CentralShipmentsPage() {
                   <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColor[sh.status] || 'bg-slate-100 text-slate-700'}`}>
                     {SHIPMENT_STATUS[sh.status] || sh.status}
                   </span>
+                </td>
+                <td className='px-4 py-3'>
+                  {shipmentNeedsManagerCodConfirm(sh) ? (
+                    <span
+                      className='inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-900'
+                      title='COD đã giao — chờ quản lý xác nhận số tiền'
+                    >
+                      Chờ xác nhận COD
+                    </span>
+                  ) : Number(sh.cod_amount || 0) > 0 && sh.status === 'DELIVERED' && ['CONFIRMED', 'DISPUTED'].includes(String(sh.cod_status || '')) ? (
+                    <span className='text-xs text-slate-500'>COD đã xử lý</span>
+                  ) : (
+                    <span className='text-xs text-slate-400'>—</span>
+                  )}
                 </td>
                 <td className='px-4 py-3 text-right'>
                   <div className='flex items-center justify-end gap-1'>
@@ -810,6 +894,17 @@ export default function CentralShipmentsPage() {
             {detailError && <p className='text-sm text-red-600'>{detailError}</p>}
             {detailShipment && (
               <div className='space-y-4'>
+                {canConfirmCOD && shipmentNeedsManagerCodConfirm(detailShipment) && (
+                  <div className='flex items-start gap-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2.5 text-sm text-amber-950'>
+                    <AlertCircle className='mt-0.5 h-5 w-5 shrink-0 text-amber-600' aria-hidden />
+                    <div>
+                      <p className='font-semibold'>Phiếu này chờ quản lý xác nhận COD</p>
+                      <p className='mt-1 text-xs leading-relaxed text-amber-900/95'>
+                        Kéo xuống mục <strong>Thu hộ COD</strong>, đối chiếu ảnh và số tiền tài xế báo, rồi bấm <strong>Xác nhận số tiền đúng</strong> hoặc <strong>Báo không khớp</strong>.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className='rounded-lg border border-slate-200 bg-slate-50/50 p-3'>
                   <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
                     <span className='text-slate-500'>Số lô giao:</span>
@@ -880,39 +975,117 @@ export default function CentralShipmentsPage() {
                   );
                 })()}
 
-                {Number(detailShipment?.cod_amount || 0) > 0 && (
-                  <div className='rounded-lg border border-amber-200 bg-amber-50/70 p-3'>
-                    <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800'>Thông tin COD</h3>
-                    <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
-                      <span className='text-amber-700/80'>Số tiền cần thu:</span>
-                      <span className='font-medium'>{Number(detailShipment.cod_amount || 0).toLocaleString('vi-VN')} đ</span>
-                      <span className='text-amber-700/80'>Số tiền đã thu:</span>
-                      <span className='font-medium'>{Number(detailShipment.cod_collected_amount || 0).toLocaleString('vi-VN')} đ</span>
-                      <span className='text-amber-700/80'>Trạng thái COD:</span>
-                      <span>{detailShipment.cod_status || 'PENDING'}</span>
-                    </div>
-                    {canConfirmCOD && Number(detailShipment.cod_collected_amount || 0) > 0 && !['CONFIRMED', 'DISPUTED'].includes(detailShipment.cod_status) && (
-                      <div className='mt-3 flex gap-2'>
-                        <button
-                          type='button'
-                          disabled={actionLoadingId === detailShipment._id}
-                          onClick={() => handleManagerCODReview(detailShipment, 'CONFIRMED')}
-                          className='rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
-                        >
-                          Xác nhận COD
-                        </button>
-                        <button
-                          type='button'
-                          disabled={actionLoadingId === detailShipment._id}
-                          onClick={() => handleManagerCODReview(detailShipment, 'DISPUTED')}
-                          className='rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60'
-                        >
-                          Báo tranh chấp COD
-                        </button>
+                {Number(detailShipment?.cod_amount || 0) > 0 && (() => {
+                  const expectedCod = Number(detailShipment.cod_amount || 0);
+                  const collectedCod = Number(detailShipment.cod_collected_amount || 0);
+                  const codMismatch =
+                    collectedCod > 0 && Math.abs(expectedCod - collectedCod) > 0.5;
+                  const evidenceUrls = getCodEvidencePhotoUrls(detailShipment).map((u) => resolvePhotoUrl(u));
+                  const codStatusKey = detailShipment.cod_status || 'PENDING';
+                  return (
+                    <div className='rounded-lg border border-amber-200 bg-amber-50/70 p-3'>
+                      <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800'>
+                        Thu hộ COD — đối chiếu sau khi tài xế giao
+                      </h3>
+                      <p className='mb-3 text-xs leading-relaxed text-amber-900/90'>
+                        Tài xế nhập số tiền mặt đã thu và đính kèm hình chứng minh khi xác nhận giao. Quản lý kiểm tra ảnh và số tiền có khớp với đơn hay không rồi xác nhận hoặc báo tranh chấp.
+                      </p>
+                      <div className='grid grid-cols-2 gap-x-4 gap-y-1 text-sm'>
+                        <span className='text-amber-700/80'>Số tiền cần thu (đơn):</span>
+                        <span className='font-medium tabular-nums'>{expectedCod.toLocaleString('vi-VN')} đ</span>
+                        <span className='text-amber-700/80'>Số tiền tài xế báo đã thu:</span>
+                        <span className={`font-medium tabular-nums ${codMismatch ? 'text-red-700' : ''}`}>
+                          {collectedCod.toLocaleString('vi-VN')} đ
+                        </span>
+                        <span className='text-amber-700/80'>Trạng thái COD:</span>
+                        <span>{COD_STATUS_VI[codStatusKey] || codStatusKey}</span>
+                        {detailShipment.cod_collected_by && (
+                          <>
+                            <span className='text-amber-700/80'>Tài xế thu:</span>
+                            <span>
+                              {typeof detailShipment.cod_collected_by === 'object'
+                                ? detailShipment.cod_collected_by.full_name ||
+                                  detailShipment.cod_collected_by.username ||
+                                  '-'
+                                : '-'}
+                            </span>
+                          </>
+                        )}
+                        {detailShipment.cod_collected_at && (
+                          <>
+                            <span className='text-amber-700/80'>Thời điểm báo thu:</span>
+                            <span>{new Date(detailShipment.cod_collected_at).toLocaleString('vi-VN')}</span>
+                          </>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
+                      {codMismatch && (
+                        <p className='mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-800'>
+                          Cảnh báo: số tiền tài xế báo <strong>khác</strong> số tiền COD trên đơn. Vui lòng đối chiếu ảnh chứng minh trước khi xác nhận.
+                        </p>
+                      )}
+                      {detailShipment.cod_collection_notes?.trim() && (
+                        <div className='mt-2 rounded-md border border-amber-200/80 bg-white/80 px-2 py-1.5 text-xs text-slate-700'>
+                          <span className='font-medium text-amber-900'>Ghi chú tài xế: </span>
+                          {detailShipment.cod_collection_notes}
+                        </div>
+                      )}
+                      {evidenceUrls.filter(Boolean).length > 0 && (
+                        <div className='mt-3'>
+                          <p className='mb-2 text-xs font-semibold text-amber-900'>Hình chứng minh thu tiền (từ tài xế)</p>
+                          <div className='flex flex-wrap gap-2'>
+                            {evidenceUrls.filter(Boolean).map((url, idx) => (
+                              <a
+                                key={`${url}-${idx}`}
+                                href={url}
+                                target='_blank'
+                                rel='noreferrer'
+                                className='block overflow-hidden rounded-lg border border-amber-300 bg-white shadow-sm'
+                              >
+                                <img
+                                  src={url}
+                                  alt={`Chứng minh COD ${idx + 1}`}
+                                  className='h-24 w-24 object-cover'
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {['CONFIRMED', 'DISPUTED'].includes(detailShipment.cod_status) &&
+                        detailShipment.cod_manager_notes?.trim() && (
+                          <p className='mt-2 text-xs text-slate-600'>
+                            <span className='font-medium'>Ghi chú quản lý: </span>
+                            {detailShipment.cod_manager_notes}
+                          </p>
+                        )}
+                      {canConfirmCOD &&
+                        Number(detailShipment.cod_collected_amount || 0) > 0 &&
+                        !['CONFIRMED', 'DISPUTED'].includes(detailShipment.cod_status) && (
+                          <div className='mt-3 flex flex-wrap gap-2'>
+                            <button
+                              type='button'
+                              disabled={actionLoadingId === detailShipment._id}
+                              onClick={() => handleManagerCODReview(detailShipment, 'CONFIRMED')}
+                              className='rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
+                            >
+                              Xác nhận số tiền đúng
+                            </button>
+                            <button
+                              type='button'
+                              disabled={actionLoadingId === detailShipment._id}
+                              onClick={() => handleManagerCODReview(detailShipment, 'DISPUTED')}
+                              className='rounded-lg border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60'
+                            >
+                              Báo không khớp / tranh chấp
+                            </button>
+                          </div>
+                        )}
+                    </div>
+                  );
+                })()}
 
 
                 {/* Action buttons */}

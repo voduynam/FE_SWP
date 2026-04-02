@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { paymentService } from '../../services/paymentService';
@@ -51,6 +52,7 @@ function getLocalDateTimeString() {
 
 export default function FranchiseOrdersPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, pages: 0 });
   const [items, setItems] = useState([]);
@@ -85,6 +87,9 @@ export default function FranchiseOrdersPage() {
   const [receiptNotes, setReceiptNotes] = useState('');
   const [deliveryDiscrepancy, setDeliveryDiscrepancy] = useState('');
   const [receiptEvidenceFiles, setReceiptEvidenceFiles] = useState([]);
+  const [receiptEvidencePreviewUrls, setReceiptEvidencePreviewUrls] = useState([]);
+  /** Khi nhận có vấn đề: phân loại để hướng dẫn trả hàng / bù */
+  const [receiptIssueKind, setReceiptIssueKind] = useState('');
 
   const [newOrder, setNewOrder] = useState({
     order_date: getLocalDateTimeString(),
@@ -92,6 +97,13 @@ export default function FranchiseOrdersPage() {
     payment_type: 'COD',
     lines: [{ item_id: '', qty_ordered: '', uom_id: '', unit_price: 0 }],
   });
+
+  useEffect(() => {
+    const files = receiptEvidenceFiles || [];
+    const urls = files.map(f => URL.createObjectURL(f));
+    setReceiptEvidencePreviewUrls(urls);
+    return () => urls.forEach(u => URL.revokeObjectURL(u));
+  }, [receiptEvidenceFiles]);
 
   const loadOrders = async (page = 1) => {
     setLoading(true);
@@ -298,9 +310,15 @@ export default function FranchiseOrdersPage() {
         const payment = paymentData.payment || {};
         const checkoutUrl =
           paymentData.checkout_url ||
+          paymentData.checkoutUrl ||
           paymentData.payos_link ||
           paymentData.payment_link ||
           '';
+        const qrSrc =
+          paymentData.qr_code ||
+          paymentData.payos_qr ||
+          payment.qr_code_base64 ||
+          null;
         const amount = orderAmount ?? payment.amount ?? 0;
 
         setPendingPaymentInfo({
@@ -308,7 +326,13 @@ export default function FranchiseOrdersPage() {
           orderNo,
           amount,
           checkoutUrl,
+          qrSrc,
         });
+        if (!checkoutUrl && !qrSrc) {
+          alert(
+            'Không nhận được link hoặc mã QR từ PayOS. Vui lòng thử lại hoặc liên hệ quản trị.'
+          );
+        }
         // Đóng popup xác nhận đơn, mở alert xác nhận thanh toán
         setConfirmOpen(false);
         setPaymentConfirmOpen(true);
@@ -362,7 +386,23 @@ export default function FranchiseOrdersPage() {
       if (paymentType === 'BANK_TRANSFER') {
         await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
       } else {
-        setSuccess(`Đã đặt hàng COD cho đơn ${orderNo}. Driver sẽ thu tiền khi giao hàng.`);
+        const subRes = await workflowService.updateInternalOrderStatus(
+          orderId,
+          'SUBMITTED'
+        );
+        if (!subRes.success) {
+          setCreateError(
+            subRes.message ||
+              'Đơn đã tạo nhưng không gửi được lên bếp trung tâm. Vui lòng thử từ chi tiết đơn.'
+          );
+          setConfirmOpen(false);
+          setCreateOpen(false);
+          loadOrders(1).catch(() => {});
+          return;
+        }
+        setSuccess(
+          `Đã đặt hàng và gửi đơn ${orderNo} về bếp trung tâm. Thanh toán tiền mặt khi nhận hàng (COD).`
+        );
         setConfirmOpen(false);
         setCreateOpen(false);
         setExistingOrderForPayment(null);
@@ -508,6 +548,7 @@ export default function FranchiseOrdersPage() {
     setReceiptNotes('');
     setDeliveryDiscrepancy('');
     setReceiptEvidenceFiles([]);
+    setReceiptIssueKind('');
     setReceiveOpen(true);
     setReceiveLoading(true);
     try {
@@ -590,11 +631,37 @@ export default function FranchiseOrdersPage() {
         setReceiveLoading(false);
         return;
       }
+      if (receiptStatus === 'RECEIVED_WITH_ISSUES') {
+        if (!receiptIssueKind) {
+          setReceiveError('Vui lòng chọn loại vấn đề (hàng hư, thiếu hàng...).');
+          setReceiveLoading(false);
+          return;
+        }
+        if (!deliveryDiscrepancy.trim()) {
+          setReceiveError('Vui lòng mô tả chi tiết vấn đề khi nhận hàng có sự cố.');
+          setReceiveLoading(false);
+          return;
+        }
+      }
+      const discrepancyPayload =
+        receiptStatus === 'RECEIVED_WITH_ISSUES' && receiptIssueKind === 'DAMAGED'
+          ? `[Hàng hư hỏng] ${deliveryDiscrepancy.trim()}`
+          : deliveryDiscrepancy;
+
+      const receipt_lines = receiveLines.map(l => {
+        const maxQ = Number(l.qty_ship) || 0;
+        let q = Number(l.qty_received);
+        if (!Number.isFinite(q) || q < 0) q = 0;
+        if (q > maxQ) q = maxQ;
+        return { shipment_line_id: l.shipment_line_id, qty_received: q };
+      });
+
       const confirmRes = await workflowService.confirmShipmentReceipt(receiveShipment._id, {
         receipt_status: receiptStatus,
         receipt_notes: receiptNotes,
-        delivery_discrepancy: deliveryDiscrepancy,
+        delivery_discrepancy: discrepancyPayload,
         evidence_photos: receiptEvidenceFiles,
+        receipt_lines,
       });
       if (!confirmRes.success) {
         setReceiveError(confirmRes.message || 'Xác nhận nhận hàng thất bại.');
@@ -615,7 +682,33 @@ export default function FranchiseOrdersPage() {
       setReceiptNotes('');
       setDeliveryDiscrepancy('');
       setReceiptEvidenceFiles([]);
+      setReceiptIssueKind('');
       await loadOrders(pagination.page);
+      if (detailId && receiveOrder._id && detailId === receiveOrder._id) {
+        await loadDetail(receiveOrder._id);
+      }
+
+      if (receiptStatus === 'RECEIVED_WITH_ISSUES' && receiptIssueKind === 'DAMAGED') {
+        const grRes = await workflowService.getGoodsReceipts({
+          shipment_id: receiveShipment._id,
+          status: 'RECEIVED',
+          limit: 50,
+        });
+        const raw = grRes?.data;
+        const list = Array.isArray(raw?.data)
+          ? raw.data
+          : Array.isArray(raw)
+            ? raw
+            : [];
+        const sid = String(receiveShipment._id);
+        const gr =
+          list.find(r => String(r.shipment_id?._id || r.shipment_id || '') === sid) || list[0];
+        const q = gr?._id
+          ? `create=1&goodsReceiptId=${encodeURIComponent(gr._id)}&fromDamage=1`
+          : 'create=1&fromDamage=1';
+        navigate(`/app/store/returns?${q}`);
+        return;
+      }
     } catch (err) {
       console.error(err);
       setReceiveError(err?.response?.data?.message || 'Có lỗi khi nhận hàng.');
@@ -828,7 +921,6 @@ export default function FranchiseOrdersPage() {
                       <tr>
                         <th className='px-3 py-2'>Sản phẩm</th>
                         <th className='px-3 py-2'>SL đặt</th>
-                        <th className='px-3 py-2'>Đã giao</th>
                         <th className='px-3 py-2'>Đã nhận</th>
                         <th className='px-3 py-2'>Thành tiền</th>
                       </tr>
@@ -838,7 +930,6 @@ export default function FranchiseOrdersPage() {
                         <tr key={line._id || idx}>
                           <td className='px-3 py-2'>{getItemName(line)}</td>
                           <td className='px-3 py-2'>{line.qty_ordered ?? 0}</td>
-                          <td className='px-3 py-2'>{line.fulfillment?.qty_shipped_total ?? 0}</td>
                           <td className='px-3 py-2'>{line.fulfillment?.qty_received_total ?? 0}</td>
                           <td className='px-3 py-2'>{line.line_total != null ? Number(line.line_total).toLocaleString('vi-VN') : '-'}</td>
                         </tr>
@@ -1076,7 +1167,7 @@ export default function FranchiseOrdersPage() {
                       checked={newOrder.payment_type === 'BANK_TRANSFER'}
                       onChange={e => setNewOrder(prev => ({ ...prev, payment_type: e.target.value }))}
                     />
-                    Chuyển khoản PayOS
+                    Chuyển khoản (PayOS — QR / cổng thanh toán)
                   </label>
                 </div>
               </div>
@@ -1109,7 +1200,20 @@ export default function FranchiseOrdersPage() {
                           if (paymentType === 'BANK_TRANSFER') {
                             await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
                           } else {
-                            setSuccess(`Đã gửi đơn COD ${orderNo}. Driver sẽ thu tiền khi giao.`);
+                            const subRes = await workflowService.updateInternalOrderStatus(
+                              orderId,
+                              'SUBMITTED'
+                            );
+                            if (!subRes.success) {
+                              alert(
+                                subRes.message ||
+                                  'Không gửi được đơn lên bếp trung tâm.'
+                              );
+                              return;
+                            }
+                            setSuccess(
+                              `Đã gửi đơn ${orderNo} về bếp trung tâm. Thanh toán tiền mặt khi nhận hàng (COD).`
+                            );
                             setConfirmOpen(false);
                             setCreateOpen(false);
                             setExistingOrderForPayment(null);
@@ -1167,8 +1271,19 @@ export default function FranchiseOrdersPage() {
                 <strong>{Number(pendingPaymentInfo.amount || 0).toLocaleString('vi-VN')} đ</strong>.
               </p>
               <p className='text-xs text-slate-500'>
-                Sau khi xác nhận, bạn sẽ được chuyển sang trang thanh toán PayOS để hoàn tất chuyển khoản.
+                Bạn có thể quét mã QR hoặc bấm &quot;Thanh toán ngay&quot; để mở cổng PayOS. Sau khi chuyển khoản
+                thành công, hệ thống sẽ chuyển về trang xác nhận.
               </p>
+              {pendingPaymentInfo.qrSrc && (
+                <div className='rounded-lg border border-slate-100 bg-slate-50 p-3 text-center'>
+                  <p className='mb-2 text-xs text-slate-500'>Quét mã QR để chuyển khoản</p>
+                  <img
+                    src={pendingPaymentInfo.qrSrc}
+                    alt='QR PayOS'
+                    className='mx-auto max-h-56 w-auto max-w-full object-contain'
+                  />
+                </div>
+              )}
               {redirectingToPayOS && (
                 <p className='text-xs text-emerald-600'>
                   Đang chuyển đến trang thanh toán PayOS, vui lòng chờ...
@@ -1191,12 +1306,18 @@ export default function FranchiseOrdersPage() {
               </button>
               <button
                 type='button'
-                disabled={creating || redirectingToPayOS}
+                disabled={
+                  creating ||
+                  redirectingToPayOS ||
+                  !pendingPaymentInfo.checkoutUrl
+                }
                 onClick={async () => {
                   if (redirectingToPayOS || creating) return;
                   const url = pendingPaymentInfo.checkoutUrl;
                   if (!url) {
-                    alert('Không tìm thấy link thanh toán PayOS. Vui lòng liên hệ quản trị hệ thống.');
+                    alert(
+                      'Không có link cổng PayOS. Vui lòng quét mã QR phía trên hoặc liên hệ quản trị.'
+                    );
                     return;
                   }
 
@@ -1206,7 +1327,7 @@ export default function FranchiseOrdersPage() {
                 }}
                 className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60'
               >
-                {redirectingToPayOS ? 'Đang chuyển...' : 'Thanh toán ngay'}
+                {redirectingToPayOS ? 'Đang chuyển...' : 'Mở cổng thanh toán PayOS'}
               </button>
             </div>
           </div>
@@ -1225,6 +1346,11 @@ export default function FranchiseOrdersPage() {
               setReceiveShipment(null);
               setReceiveLines([]);
               setReceiveError('');
+              setReceiptStatus('RECEIVED_OK');
+              setReceiptNotes('');
+              setDeliveryDiscrepancy('');
+              setReceiptEvidenceFiles([]);
+              setReceiptIssueKind('');
             }
           }}
         >
@@ -1247,6 +1373,11 @@ export default function FranchiseOrdersPage() {
                     setReceiveShipment(null);
                     setReceiveLines([]);
                     setReceiveError('');
+                    setReceiptStatus('RECEIVED_OK');
+                    setReceiptNotes('');
+                    setDeliveryDiscrepancy('');
+                    setReceiptEvidenceFiles([]);
+                    setReceiptIssueKind('');
                   }
                 }}
                 className='px-2 text-xl leading-none text-slate-400 hover:text-slate-600'
@@ -1317,6 +1448,7 @@ export default function FranchiseOrdersPage() {
                       <tr>
                         <th className='px-2 py-2'>Sản phẩm</th>
                         <th className='px-2 py-2 text-right'>SL giao</th>
+                        <th className='px-2 py-2 text-right'>SL đã nhận</th>
                       </tr>
                     </thead>
                     <tbody className='divide-y divide-slate-100 bg-white'>
@@ -1328,18 +1460,52 @@ export default function FranchiseOrdersPage() {
                               <div className='text-[11px] text-slate-400'>{line.sku}</div>
                             )}
                           </td>
-                          <td className='px-2 py-2 text-right'>{line.qty_ship}</td>
+                          <td className='px-2 py-2 text-right tabular-nums'>{line.qty_ship}</td>
+                          <td className='px-2 py-2 text-right'>
+                            <input
+                              type='number'
+                              min={0}
+                              max={line.qty_ship}
+                              step='any'
+                              value={line.qty_received === '' || line.qty_received == null ? '' : line.qty_received}
+                              onChange={e => {
+                                const raw = e.target.value;
+                                const maxQ = Number(line.qty_ship) || 0;
+                                setReceiveLines(prev =>
+                                  prev.map((l, i) => {
+                                    if (i !== idx) return l;
+                                    if (raw === '') return { ...l, qty_received: '' };
+                                    let n = Number(raw);
+                                    if (!Number.isFinite(n) || n < 0) n = 0;
+                                    if (n > maxQ) n = maxQ;
+                                    return { ...l, qty_received: n };
+                                  })
+                                );
+                              }}
+                              className='w-20 rounded border border-slate-200 px-1.5 py-1 text-right tabular-nums'
+                              disabled={receiptStatus === 'NOT_RECEIVED'}
+                            />
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                )}
+                {receiveLines.length > 0 && receiptStatus === 'NOT_RECEIVED' && (
+                  <p className='text-[11px] text-slate-500'>
+                    Báo chưa nhận hàng — không cần nhập số lượng thực nhận.
+                  </p>
                 )}
                 <div className='grid gap-2 pt-1 sm:grid-cols-2'>
                   <div>
                     <label className='mb-1 block text-[11px] font-medium text-slate-600'>Trạng thái nhận hàng</label>
                     <select
                       value={receiptStatus}
-                      onChange={e => setReceiptStatus(e.target.value)}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setReceiptStatus(v);
+                        if (v !== 'RECEIVED_WITH_ISSUES') setReceiptIssueKind('');
+                      }}
                       className='w-full rounded border border-slate-200 px-2 py-1.5 text-xs'
                     >
                       <option value='RECEIVED_OK'>Nhận đủ, không vấn đề</option>
@@ -1347,15 +1513,130 @@ export default function FranchiseOrdersPage() {
                       <option value='NOT_RECEIVED'>Chưa nhận được hàng</option>
                     </select>
                   </div>
-                  <div>
-                    <label className='mb-1 block text-[11px] font-medium text-slate-600'>Bằng chứng (ảnh/video)</label>
-                    <input
-                      type='file'
-                      multiple
-                      accept='image/*,video/*'
-                      onChange={e => setReceiptEvidenceFiles(Array.from(e.target.files || []).slice(0, 5))}
-                      className='w-full rounded border border-slate-200 px-2 py-1 text-xs'
-                    />
+                  {receiptStatus === 'RECEIVED_WITH_ISSUES' && (
+                    <div className='sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3'>
+                      <label className='mb-1 block text-[11px] font-medium text-amber-900'>
+                        Loại vấn đề <span className='text-red-600'>*</span>
+                      </label>
+                      <select
+                        value={receiptIssueKind}
+                        onChange={e => setReceiptIssueKind(e.target.value)}
+                        className='w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-xs'
+                        required
+                      >
+                        <option value=''>-- Chọn --</option>
+                        <option value='DAMAGED'>
+                          Hàng hư hỏng / biến dạng — sau xác nhận sẽ mở Trả hàng để gửi yêu cầu trả bù (kèm ảnh/video)
+                        </option>
+                        <option value='SHORTAGE'>Thiếu hàng so với lô giao</option>
+                        <option value='OTHER'>Khác</option>
+                      </select>
+                      {receiptIssueKind === 'DAMAGED' && (
+                        <p className='mt-2 text-[11px] leading-relaxed text-amber-900'>
+                          Sau khi bấm <strong>Xác nhận nhận hàng</strong>, bạn sẽ được chuyển tới{' '}
+                          <strong>Trả hàng</strong> để chọn phiếu nhận, số lượng trả từng dòng và tải bằng chứng.
+                          Manager phê duyệt sẽ tạo <strong>đơn bù miễn phí</strong> (theo quy trình hệ thống).
+                          Hoặc mở sẵn:{' '}
+                          <Link to='/app/store/returns' className='font-medium text-orange-700 underline'>
+                            Trả hàng
+                          </Link>
+                          .
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <div className='sm:col-span-2'>
+                    <label className='mb-1 block text-[11px] font-medium text-slate-600'>
+                      Bằng chứng (ảnh/video)
+                    </label>
+                    <label
+                      className={`flex cursor-pointer flex-col gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-700 hover:border-slate-400 hover:bg-slate-50/80 ${receiptEvidenceFiles.length >= 5 ? 'pointer-events-none opacity-60' : ''}`}
+                    >
+                      <span className='font-medium text-slate-800'>
+                        {receiptEvidenceFiles.length >= 5
+                          ? 'Đã đủ 5 tệp (xóa ảnh bên dưới để thêm)'
+                          : receiptEvidenceFiles.length > 0
+                            ? `Đã chọn ${receiptEvidenceFiles.length}/5 tệp — bấm chọn tệp để thêm`
+                            : 'Chọn ảnh hoặc video (tối đa 5, có thể chọn lần lượt)'}
+                      </span>
+                      <span className='text-[11px] text-slate-500'>
+                        Mỗi lần chọn sẽ thêm vào danh sách; có thể chọn nhiều tệp trong một hộp thoại hoặc chọn từng lần.
+                      </span>
+                      <input
+                        type='file'
+                        multiple
+                        accept='image/*,video/*'
+                        disabled={receiptEvidenceFiles.length >= 5}
+                        onChange={e => {
+                          const picked = Array.from(e.target.files || []);
+                          e.target.value = '';
+                          if (!picked.length) return;
+                          setReceiptEvidenceFiles(prev => {
+                            const room = 5 - prev.length;
+                            if (room <= 0) return prev;
+                            return [...prev, ...picked.slice(0, room)];
+                          });
+                        }}
+                        className='mt-1 w-full text-[11px] file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-slate-800 disabled:opacity-50'
+                      />
+                    </label>
+                    {receiptEvidencePreviewUrls.length > 0 && (
+                      <div className='mt-3 rounded-xl border border-slate-200 bg-white p-3'>
+                        <p className='mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600'>
+                          Xem trước bằng chứng
+                        </p>
+                        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4'>
+                          {receiptEvidenceFiles.map((file, i) => {
+                            const url = receiptEvidencePreviewUrls[i];
+                            if (!url) return null;
+                            const isVideo = file?.type?.startsWith('video');
+                            return (
+                              <div
+                                key={`${file.name}-${file.lastModified ?? ''}-${i}`}
+                                className='group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50'
+                              >
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    setReceiptEvidenceFiles(prev => prev.filter((_, j) => j !== i))
+                                  }
+                                  className='absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900/75 text-xs font-bold text-white shadow hover:bg-red-600'
+                                  title='Xóa tệp này'
+                                  aria-label='Xóa tệp'
+                                >
+                                  ×
+                                </button>
+                                <a
+                                  href={url}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='block'
+                                >
+                                  {isVideo ? (
+                                    <video
+                                      src={url}
+                                      className='h-28 w-full object-cover'
+                                      muted
+                                      playsInline
+                                      preload='metadata'
+                                    />
+                                  ) : (
+                                    <img
+                                      src={url}
+                                      alt={file.name || `Bằng chứng ${i + 1}`}
+                                      className='h-28 w-full object-cover'
+                                    />
+                                  )}
+                                  <span className='absolute bottom-0 left-0 right-0 truncate bg-slate-900/70 px-1 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100'>
+                                    {file.name}
+                                  </span>
+                                </a>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <textarea
@@ -1386,6 +1667,11 @@ export default function FranchiseOrdersPage() {
                     setReceiveShipment(null);
                     setReceiveLines([]);
                     setReceiveError('');
+                    setReceiptStatus('RECEIVED_OK');
+                    setReceiptNotes('');
+                    setDeliveryDiscrepancy('');
+                    setReceiptEvidenceFiles([]);
+                    setReceiptIssueKind('');
                   }}
                   className='rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100'
                 >

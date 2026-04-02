@@ -174,7 +174,7 @@ export default function Delivery() {
             placeholder="Tìm kiếm theo mã, cửa hàng, tài xế..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-field pl-11"
+            className="input-field w-full pl-11"
           />
         </div>
         <select

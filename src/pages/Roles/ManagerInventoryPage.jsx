@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo, Fragment, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { RefreshCcw, Search, Package, ArrowUpDown, PlusCircle, History, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { RefreshCcw, Search, Package, ArrowUpDown, PlusCircle, History, AlertTriangle, ChevronDown, Clock, Skull, CheckCircle2 } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
 import { useAuth } from '../../contexts/AuthContext';
 import { getQtyAvailable } from '../../utils/inventoryHelpers';
@@ -86,6 +87,7 @@ const getLotCode = row => {
 };
 
 export default function ManagerInventoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const roleCodes = Array.isArray(user?.roles)
     ? user.roles.map(r => String(r.code || '').toUpperCase())
@@ -120,6 +122,10 @@ export default function ManagerInventoryPage() {
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [lowStockAlerts, setLowStockAlerts] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState([]);
+  /** low_stock | near_expiry | expired — trong tab Cảnh báo */
+  const [inventoryAlertSub, setInventoryAlertSub] = useState('low_stock');
+  const [alertLocationFilter, setAlertLocationFilter] = useState('ALL');
+  const [disposingLotId, setDisposingLotId] = useState(null);
 
   // Adjust modal
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -134,8 +140,121 @@ export default function ManagerInventoryPage() {
   const [items, setItems] = useState([]);
   const [adjustLots, setAdjustLots] = useState([]);
   const adjustFromRowRef = useRef(false);
+  const adjustFromMrRef = useRef(false);
 
-  useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 3000); return () => clearTimeout(t); } }, [success]);
+  /** Yêu cầu nguyên liệu vừa duyệt — cần nhập kho (query ?mr=) */
+  const [pendingMr, setPendingMr] = useState(null);
+  const [pendingMrLoading, setPendingMrLoading] = useState(false);
+  const [pendingMrError, setPendingMrError] = useState('');
+  const [completingMr, setCompletingMr] = useState(false);
+
+  useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 5000); return () => clearTimeout(t); } }, [success]);
+
+  const mrIdParam = searchParams.get('mr');
+
+  useEffect(() => {
+    if (!mrIdParam) {
+      setPendingMr(null);
+      setPendingMrError('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setPendingMrLoading(true);
+      setPendingMrError('');
+      try {
+        const res = await workflowService.getMaterialRequest(mrIdParam);
+        if (cancelled) return;
+        if (res.success && res.data) {
+          const lines = res.data.lines ?? [];
+          const merged = { ...res.data, lines };
+          const st = merged.status;
+          if (st === 'APPROVED' || st === 'PROCESSING') {
+            setPendingMr(merged);
+            const locId = merged.location_id?._id || merged.location_id;
+            if (locId) setLocationFilter(String(locId));
+            setHideZero(false);
+            setTab('balances');
+          } else {
+            setPendingMr(null);
+            if (st === 'PENDING') {
+              setPendingMrError('Yêu cầu chưa được duyệt — cần duyệt trước khi nhập kho.');
+            } else {
+              setPendingMrError(
+                st === 'COMPLETED'
+                  ? 'Yêu cầu này đã được đánh dấu hoàn tất nhập kho.'
+                  : `Trạng thái yêu cầu (${st}) không cần nhập kho tại bước này.`
+              );
+            }
+          }
+        } else {
+          setPendingMr(null);
+          setPendingMrError(res.message || 'Không tải được yêu cầu nguyên liệu.');
+        }
+      } catch {
+        if (!cancelled) {
+          setPendingMr(null);
+          setPendingMrError('Không tải được yêu cầu nguyên liệu.');
+        }
+      } finally {
+        if (!cancelled) setPendingMrLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mrIdParam]);
+
+  const openAdjustFromMrLine = async (mr, line) => {
+    if (!canAdjust) return;
+    const locId = mr.location_id?._id || mr.location_id || '';
+    const itemId = line.item_id?._id || line.item_id || '';
+    const qtyApproved = Number(line.quantity_approved) || 0;
+    const qtyReq = Number(line.quantity_requested) || 0;
+    const qty = qtyApproved > 0 ? qtyApproved : qtyReq;
+    adjustFromMrRef.current = true;
+    setAdjustForm({
+      location_id: String(locId),
+      item_id: String(itemId),
+      lot_id: '',
+      qty_adjustment: qty > 0 ? String(qty) : '',
+      reason: `Nhập bổ sung theo yêu cầu ${mr.request_no || mr._id}`,
+      adjustment_type: 'OTHER',
+    });
+    if (itemId) {
+      const res = await workflowService.getLots({ item_id: itemId, limit: 100 });
+      const list = Array.isArray(res?.data) ? res.data : (res?.data?.data ?? []);
+      setAdjustLots(list);
+    } else setAdjustLots([]);
+    setAdjustOpen(true);
+  };
+
+  const dismissMrBanner = () => {
+    setSearchParams({});
+    setPendingMr(null);
+    setPendingMrError('');
+  };
+
+  const markMrReceiptCompleted = async () => {
+    if (!pendingMr?._id) return;
+    if (!window.confirm('Xác nhận đã nhập đủ nguyên liệu theo yêu cầu này và đóng phiên nhập kho?')) return;
+    setCompletingMr(true);
+    try {
+      const res = await workflowService.updateMaterialRequestStatus(pendingMr._id, {
+        status: 'COMPLETED',
+        notes: pendingMr.notes || '',
+      });
+      if (res.success) {
+        setSuccess('Đã đánh dấu hoàn tất nhập kho theo yêu cầu.');
+        setSearchParams({});
+        setPendingMr(null);
+        loadBalances(balPag.page);
+        loadSummary();
+      } else alert(res.message || 'Cập nhật thất bại');
+    } catch (e) {
+      alert(e?.response?.data?.message || 'Cập nhật thất bại');
+    } finally {
+      setCompletingMr(false);
+    }
+  };
 
   /* ── Summary ── */
   const loadSummary = async () => {
@@ -144,12 +263,14 @@ export default function ManagerInventoryPage() {
   };
 
   /* ── Alerts ── */
-  const loadAlerts = async () => {
+  const loadAlerts = useCallback(async () => {
     setAlertsLoading(true);
     try {
+      const locParams =
+        alertLocationFilter === 'ALL' ? {} : { location_id: alertLocationFilter };
       const [lowRes, expRes] = await Promise.all([
-        workflowService.getAlertsLowStock({}),
-        workflowService.getAlertsExpiry({ days_threshold: 14 }),
+        workflowService.getAlertsLowStock(locParams),
+        workflowService.getAlertsExpiry({ days_threshold: 14, ...locParams }),
       ]);
 
       if (lowRes.success) {
@@ -170,6 +291,51 @@ export default function ManagerInventoryPage() {
       }
     } finally {
       setAlertsLoading(false);
+    }
+  }, [alertLocationFilter]);
+
+  const nearExpiryAlerts = useMemo(
+    () => expiryAlerts.filter(a => a.severity && a.severity !== 'EXPIRED'),
+    [expiryAlerts],
+  );
+  const expiredAlerts = useMemo(
+    () => expiryAlerts.filter(a => a.severity === 'EXPIRED'),
+    [expiryAlerts],
+  );
+
+  const handleDisposeExpiredAlert = async alertRow => {
+    const lotId = alertRow?.lot?._id || alertRow?.lot_id?._id || alertRow?.lot_id;
+    if (!lotId) {
+      alert('Không xác định được mã lô để xử lý.');
+      return;
+    }
+    const qty = Number(alertRow?.qty_on_hand ?? 0);
+    if (!window.confirm(
+      `Xác nhận đã xử lý lô hết hạn?\nSẽ ghi nhận tiêu hủy qua hệ thống (số lượng: ${qty || 'toàn bộ tồn theo lô'}).`,
+    )) {
+      return;
+    }
+    const notes = window.prompt('Ghi chú xử lý (không bắt buộc):', '') ?? '';
+    setDisposingLotId(lotId);
+    try {
+      const res = await workflowService.disposeLot(lotId, {
+        disposal_reason: 'EXPIRED',
+        disposal_notes: notes.trim(),
+        disposal_method: 'TRASH',
+        ...(qty > 0 ? { quantity_disposed: qty } : {}),
+      });
+      if (res.success) {
+        setSuccess('Đã ghi nhận xử lý lô hết hạn (tiêu hủy).');
+        await loadAlerts();
+        loadSummary();
+        loadBalances(balPag.page);
+      } else {
+        alert(res.message || 'Không thể xử lý lô.');
+      }
+    } catch (e) {
+      alert(e?.response?.data?.message || e?.message || 'Không thể xử lý lô.');
+    } finally {
+      setDisposingLotId(null);
     }
   };
 
@@ -259,12 +425,14 @@ export default function ManagerInventoryPage() {
     }
   }, [txnTypeFilter]);
 
-  // Init once on mount.
   useEffect(() => {
     loadSummary();
     loadFilterLocations();
-    loadAlerts();
   }, []);
+
+  useEffect(() => {
+    loadAlerts();
+  }, [loadAlerts]);
 
   // Reload balances when location filter changes.
   useEffect(() => {
@@ -370,10 +538,13 @@ export default function ManagerInventoryPage() {
   useEffect(() => {
     if (!adjustOpen) return;
     setAdjustError('');
-    if (!adjustFromRowRef.current) {
+    if (!adjustFromRowRef.current && !adjustFromMrRef.current) {
       setAdjustForm({ location_id: '', item_id: '', lot_id: '', qty_adjustment: '', reason: '', adjustment_type: 'COUNT_ADJUSTMENT' });
       setAdjustLots([]);
-    } else adjustFromRowRef.current = false;
+    } else {
+      if (adjustFromRowRef.current) adjustFromRowRef.current = false;
+      if (adjustFromMrRef.current) adjustFromMrRef.current = false;
+    }
     const load = async () => {
       const [locRes, itemRes] = await Promise.all([
         workflowService.getLocations({ limit: 200 }),
@@ -434,7 +605,11 @@ export default function ManagerInventoryPage() {
     const res = await workflowService.adjustInventory(payload);
     setAdjusting(false);
     if (res.success) {
-      setSuccess('Điều chỉnh tồn kho thành công.');
+      setSuccess(
+        mrIdParam
+          ? 'Đã ghi nhận nhập kho. Kiểm tra lại tồn dưới đây; khi đủ hãy bấm «Hoàn tất yêu cầu».'
+          : 'Điều chỉnh tồn kho thành công.'
+      );
       setAdjustOpen(false);
       loadBalances(balPag.page);
       loadSummary();
@@ -445,9 +620,15 @@ export default function ManagerInventoryPage() {
 
   const tabs = [
     { key: 'balances', label: 'Tồn kho', icon: Package },
+    { key: 'alerts', label: 'Tồn thấp & hạn dùng', icon: AlertTriangle },
     { key: 'transactions', label: 'Lịch sử giao dịch', icon: History },
-    { key: 'alerts', label: 'Cảnh báo', icon: AlertTriangle },
   ];
+
+  const lowStockSeverityLabel = {
+    CRITICAL: 'Nguy cấp',
+    HIGH: 'Rất thấp',
+    MEDIUM: 'Dưới ngưỡng',
+  };
 
   return (
     <div className='space-y-4'>
@@ -476,6 +657,103 @@ export default function ManagerInventoryPage() {
 
       {success && <div className='rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700'>{success}</div>}
       {error && <p className='text-sm text-red-600'>{error}</p>}
+
+      {mrIdParam && pendingMrLoading && (
+        <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600'>Đang tải yêu cầu nhập kho...</div>
+      )}
+      {mrIdParam && pendingMrError && !pendingMrLoading && (
+        <div className='rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900'>
+          {pendingMrError}
+          <button type='button' onClick={() => dismissMrBanner()} className='ml-3 text-amber-800 underline'>
+            Đóng
+          </button>
+        </div>
+      )}
+      {pendingMr && !pendingMrLoading && (pendingMr.status === 'APPROVED' || pendingMr.status === 'PROCESSING') && (
+        <div className='rounded-xl border-2 border-indigo-200 bg-indigo-50/90 px-4 py-4 shadow-sm'>
+          <div className='flex flex-wrap items-start justify-between gap-3'>
+            <div>
+              <h2 className='text-base font-semibold text-indigo-950'>Nhập kho theo yêu cầu đã duyệt</h2>
+              <p className='mt-1 text-sm text-indigo-900'>
+                Mã yêu cầu: <span className='font-mono font-medium'>{pendingMr.request_no}</span>
+                {' — '}
+                Kho: <strong>{pendingMr.location_id?.name || pendingMr.location_id?.code || '—'}</strong>
+              </p>
+              <p className='mt-2 text-xs text-indigo-800'>
+                Dùng <strong>«Nhập kho (+SL)»</strong> từng dòng để tăng tồn (điều chỉnh tăng). Số lượng gợi ý = số đã duyệt/yêu cầu. Nếu cần tạo lô mới trước khi gán lô, mở{' '}
+                <Link to='/app/central/materials' className='font-medium underline hover:text-indigo-950'>
+                  Nguyên liệu &amp; lô
+                </Link>
+                .
+              </p>
+            </div>
+            <div className='flex flex-wrap gap-2'>
+              <button
+                type='button'
+                onClick={markMrReceiptCompleted}
+                disabled={completingMr || !canAdjust}
+                className='rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50'
+              >
+                {completingMr ? 'Đang lưu...' : 'Hoàn tất nhập kho (đóng yêu cầu)'}
+              </button>
+              <button
+                type='button'
+                onClick={dismissMrBanner}
+                className='rounded-lg border border-indigo-300 bg-white px-3 py-2 text-sm text-indigo-900 hover:bg-white'
+              >
+                Ẩn banner (vẫn quản lý tại Yêu cầu NL)
+              </button>
+            </div>
+          </div>
+          <div className='mt-4 overflow-x-auto rounded-lg border border-indigo-100 bg-white'>
+            <table className='w-full text-sm'>
+              <thead className='border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-600'>
+                <tr>
+                  <th className='px-3 py-2'>Nguyên liệu</th>
+                  <th className='px-3 py-2'>ĐVT</th>
+                  <th className='px-3 py-2 text-right'>SL yêu cầu</th>
+                  <th className='px-3 py-2 text-right'>SL duyệt</th>
+                  <th className='px-3 py-2'>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className='divide-y divide-slate-100'>
+                {(pendingMr.lines || []).map((line, idx) => {
+                  const name = line.item_id?.name || line.item_id?.sku || line.item_id?._id || '—';
+                  const uom = line.uom_id?.code || line.uom_id?.name || '—';
+                  return (
+                    <tr key={line._id || idx}>
+                      <td className='px-3 py-2 font-medium text-slate-900'>{name}</td>
+                      <td className='px-3 py-2 text-slate-600'>{uom}</td>
+                      <td className='px-3 py-2 text-right'>{line.quantity_requested ?? '—'}</td>
+                      <td className='px-3 py-2 text-right'>{line.quantity_approved ?? 0}</td>
+                      <td className='px-3 py-2'>
+                        {canAdjust ? (
+                          <button
+                            type='button'
+                            onClick={() => openAdjustFromMrLine(pendingMr, line)}
+                            className='rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700'
+                          >
+                            Nhập kho (+SL)
+                          </button>
+                        ) : (
+                          <span className='text-xs text-slate-400'>Không quyền</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className='mt-3 text-xs text-indigo-800'>
+            Quay lại{' '}
+            <Link to='/app/manager/kitchen-ops' className='font-medium underline'>
+              Yêu cầu NL &amp; bù sản xuất
+            </Link>{' '}
+            để xem trạng thái phiếu.
+          </p>
+        </div>
+      )}
       {tab === 'balances' && filteredGroups.some(r => (r.qty_on_hand ?? 0) < 0) && (
         <div className='rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800'>
           Có {filteredGroups.filter(r => (r.qty_on_hand ?? 0) < 0).length} nhóm tồn âm. Vui lòng dùng <strong>Điều chỉnh</strong> để sửa.
@@ -856,76 +1134,321 @@ export default function ManagerInventoryPage() {
         </div>
       )}
 
-      {/* === Alerts Tab === */}
+      {/* === Alerts: tồn thấp | sắp hết hạn | đã hết hạn (API /alerts/* + dispose BE) === */}
       {tab === 'alerts' && (
-        <div className='space-y-3'>
-          <div className='flex items-center justify-between'>
+        <div className='space-y-5'>
+          <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
             <div>
-              <h2 className='text-base font-semibold text-slate-900'>Cảnh báo tồn kho</h2>
-              <p className='text-sm text-slate-500'>Tồn kho thấp và lô sắp hết hạn</p>
+              <h2 className='text-lg font-semibold text-slate-900'>Theo dõi tồn &amp; hạn dùng</h2>
+              <p className='text-sm text-slate-500'>
+                Dữ liệu từ <span className='font-mono text-xs'>GET /alerts/low-stock</span> và{' '}
+                <span className='font-mono text-xs'>GET /alerts/expiry</span>. Lô hết hạn: xử lý qua{' '}
+                <span className='font-mono text-xs'>PUT /lots/:id/dispose</span>.
+              </p>
             </div>
-            <div className='text-sm text-slate-500'>
-              {alertsLoading ? 'Đang tải...' : `${lowStockAlerts.length + expiryAlerts.length} cảnh báo`}
+            <div className='flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:max-w-xs'>
+              <label className='text-xs font-medium text-slate-500'>Lọc theo kho</label>
+              <select
+                value={alertLocationFilter}
+                onChange={e => setAlertLocationFilter(e.target.value)}
+                disabled={locationsLoading || alertsLoading}
+                className='rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm'
+              >
+                <option value='ALL'>Tất cả kho</option>
+                {filterLocations.map(l => (
+                  <option key={l._id} value={l._id}>
+                    {l.name || l.code || l._id}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className='grid gap-4 md:grid-cols-2'>
-            <div className='rounded-xl border border-slate-200 bg-white'>
-              <div className='border-b border-slate-200 px-4 py-3'>
-                <h3 className='text-sm font-semibold text-slate-900'>Tồn kho thấp</h3>
-                <p className='text-xs text-slate-500'>Sản phẩm dưới mức tối thiểu</p>
-              </div>
-              <div className='divide-y divide-slate-100'>
-                {alertsLoading && <p className='px-4 py-6 text-sm text-slate-400'>Đang tải...</p>}
-                {!alertsLoading && !lowStockAlerts.length && <p className='px-4 py-6 text-sm text-slate-400'>Không có cảnh báo</p>}
-                {!alertsLoading &&
-                  lowStockAlerts.map((r, idx) => (
-                    <div key={r._id || r.alert_id || idx} className='px-4 py-3'>
-                      <div className='flex items-center justify-between'>
-                        <span className='text-sm font-medium text-slate-900'>
-                          {r.item?.name || r.item_name || getItemName(r.item_id)}
-                        </span>
-                        <span className='rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700'>Thấp</span>
-                      </div>
-                      <p className='mt-0.5 text-xs text-slate-500'>
-                        Khả dụng: {r.qty_available ?? '-'} | Tối thiểu: {r.min_stock ?? r.min_stock_level ?? '-'}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            </div>
+          <div className='grid gap-3 sm:grid-cols-3'>
+            <button
+              type='button'
+              onClick={() => setInventoryAlertSub('low_stock')}
+              className={`flex flex-col rounded-xl border px-4 py-3 text-left transition ${
+                inventoryAlertSub === 'low_stock'
+                  ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-200'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <span className='flex items-center gap-2 text-sm font-semibold text-slate-900'>
+                <Package className='h-4 w-4 text-amber-600' />
+                Tồn kho thấp
+              </span>
+              <span className='mt-1 text-2xl font-bold tabular-nums text-slate-900'>
+                {alertsLoading ? '…' : lowStockAlerts.length}
+              </span>
+              <span className='text-xs text-slate-500'>Dưới ngưỡng hệ thống</span>
+            </button>
+            <button
+              type='button'
+              onClick={() => setInventoryAlertSub('near_expiry')}
+              className={`flex flex-col rounded-xl border px-4 py-3 text-left transition ${
+                inventoryAlertSub === 'near_expiry'
+                  ? 'border-orange-400 bg-orange-50 ring-2 ring-orange-200'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <span className='flex items-center gap-2 text-sm font-semibold text-slate-900'>
+                <Clock className='h-4 w-4 text-orange-600' />
+                Sắp hết hạn
+              </span>
+              <span className='mt-1 text-2xl font-bold tabular-nums text-slate-900'>
+                {alertsLoading ? '…' : nearExpiryAlerts.length}
+              </span>
+              <span className='text-xs text-slate-500'>Trong 14 ngày (theo API)</span>
+            </button>
+            <button
+              type='button'
+              onClick={() => setInventoryAlertSub('expired')}
+              className={`flex flex-col rounded-xl border px-4 py-3 text-left transition ${
+                inventoryAlertSub === 'expired'
+                  ? 'border-red-400 bg-red-50 ring-2 ring-red-200'
+                  : 'border-slate-200 bg-white hover:border-slate-300'
+              }`}
+            >
+              <span className='flex items-center gap-2 text-sm font-semibold text-slate-900'>
+                <Skull className='h-4 w-4 text-red-600' />
+                Đã hết hạn
+              </span>
+              <span className='mt-1 text-2xl font-bold tabular-nums text-red-700'>
+                {alertsLoading ? '…' : expiredAlerts.length}
+              </span>
+              <span className='text-xs text-slate-500'>Cần xử lý / tiêu hủy lô</span>
+            </button>
+          </div>
 
-            <div className='rounded-xl border border-slate-200 bg-white'>
-              <div className='border-b border-slate-200 px-4 py-3'>
-                <h3 className='text-sm font-semibold text-slate-900'>Sắp hết hạn</h3>
-                <p className='text-xs text-slate-500'>Lô hàng sắp hết hạn sử dụng</p>
-              </div>
-              <div className='divide-y divide-slate-100'>
-                {alertsLoading && <p className='px-4 py-6 text-sm text-slate-400'>Đang tải...</p>}
-                {!alertsLoading && !expiryAlerts.length && <p className='px-4 py-6 text-sm text-slate-400'>Không có cảnh báo</p>}
-                {!alertsLoading &&
-                  expiryAlerts.map((r, idx) => (
-                    <div key={r._id || r.alert_id || idx} className='px-4 py-3'>
-                      <div className='flex items-center justify-between'>
-                        <span className='text-sm font-medium text-slate-900'>
-                          {r.item?.name || r.lot?.item_id?.name || getItemName(r.item_id)}
-                        </span>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${severityColor[r.severity] || 'bg-slate-100 text-slate-600'}`}>
-                          {severityLabel[r.severity] || r.severity || `${r.days_until_expiry ?? '?'} ngày`}
-                        </span>
-                      </div>
-                      <p className='mt-0.5 text-xs text-slate-500'>
-                        Lô: {r.lot?.lot_code || r.lot_code || '-'} | Ngày hết hạn:{' '}
-                        {r.lot?.exp_date
-                          ? new Date(r.lot.exp_date).toLocaleDateString('vi-VN')
-                          : r.exp_date
-                            ? new Date(r.exp_date).toLocaleDateString('vi-VN')
-                            : '-'}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            </div>
+          <div className='overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm'>
+            {inventoryAlertSub === 'low_stock' && (
+              <>
+                <div className='border-b border-slate-100 bg-slate-50/80 px-4 py-3'>
+                  <h3 className='text-sm font-semibold text-slate-900'>Danh sách tồn thấp</h3>
+                  <p className='text-xs text-slate-500'>Khả dụng so với mức tối thiểu (theo cấu hình BE)</p>
+                </div>
+                <div className='overflow-x-auto'>
+                  <table className='w-full min-w-[640px] text-sm'>
+                    <thead className='border-b border-slate-200 bg-white text-left text-xs uppercase tracking-wide text-slate-500'>
+                      <tr>
+                        <th className='px-4 py-2.5'>Sản phẩm</th>
+                        <th className='px-4 py-2.5'>Kho</th>
+                        <th className='px-4 py-2.5 text-right'>Tồn</th>
+                        <th className='px-4 py-2.5 text-right'>Khả dụng</th>
+                        <th className='px-4 py-2.5 text-right'>Tối thiểu</th>
+                        <th className='px-4 py-2.5'>Mức độ</th>
+                      </tr>
+                    </thead>
+                    <tbody className='divide-y divide-slate-100'>
+                      {alertsLoading && (
+                        <tr>
+                          <td colSpan={6} className='px-4 py-8 text-center text-slate-400'>
+                            Đang tải...
+                          </td>
+                        </tr>
+                      )}
+                      {!alertsLoading && !lowStockAlerts.length && (
+                        <tr>
+                          <td colSpan={6} className='px-4 py-8 text-center text-slate-400'>
+                            Không có cảnh báo tồn thấp.
+                          </td>
+                        </tr>
+                      )}
+                      {!alertsLoading &&
+                        lowStockAlerts.map((r, idx) => (
+                          <tr key={r.alert_id || idx} className='hover:bg-slate-50/60'>
+                            <td className='px-4 py-3 font-medium text-slate-900'>
+                              {r.item?.name || r.item?.sku || getItemName(r.item_id)}
+                              {r.item?.sku && (
+                                <span className='mt-0.5 block font-normal text-xs text-slate-500'>{r.item.sku}</span>
+                              )}
+                            </td>
+                            <td className='px-4 py-3 text-slate-600'>{getLocName(r.location)}</td>
+                            <td className='px-4 py-3 text-right tabular-nums'>{r.qty_on_hand ?? '—'}</td>
+                            <td className='px-4 py-3 text-right font-medium tabular-nums text-slate-900'>
+                              {r.qty_available ?? '—'}
+                            </td>
+                            <td className='px-4 py-3 text-right tabular-nums text-slate-600'>
+                              {r.min_stock ?? r.min_stock_level ?? '—'}
+                            </td>
+                            <td className='px-4 py-3'>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                  r.severity === 'CRITICAL'
+                                    ? 'bg-red-100 text-red-800'
+                                    : r.severity === 'HIGH'
+                                      ? 'bg-orange-100 text-orange-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {lowStockSeverityLabel[r.severity] || r.severity}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {inventoryAlertSub === 'near_expiry' && (
+              <>
+                <div className='border-b border-slate-100 bg-slate-50/80 px-4 py-3'>
+                  <h3 className='text-sm font-semibold text-slate-900'>Lô sắp đến hạn sử dụng</h3>
+                  <p className='text-xs text-slate-500'>Chưa quá hạn — ưu tiên bán / dùng trước</p>
+                </div>
+                <div className='overflow-x-auto'>
+                  <table className='w-full min-w-[720px] text-sm'>
+                    <thead className='border-b border-slate-200 bg-white text-left text-xs uppercase tracking-wide text-slate-500'>
+                      <tr>
+                        <th className='px-4 py-2.5'>Sản phẩm</th>
+                        <th className='px-4 py-2.5'>Kho</th>
+                        <th className='px-4 py-2.5'>Lô</th>
+                        <th className='px-4 py-2.5'>Hạn SD</th>
+                        <th className='px-4 py-2.5 text-right'>Còn (ngày)</th>
+                        <th className='px-4 py-2.5 text-right'>SL tồn</th>
+                        <th className='px-4 py-2.5'>Mức độ</th>
+                      </tr>
+                    </thead>
+                    <tbody className='divide-y divide-slate-100'>
+                      {alertsLoading && (
+                        <tr>
+                          <td colSpan={7} className='px-4 py-8 text-center text-slate-400'>
+                            Đang tải...
+                          </td>
+                        </tr>
+                      )}
+                      {!alertsLoading && !nearExpiryAlerts.length && (
+                        <tr>
+                          <td colSpan={7} className='px-4 py-8 text-center text-slate-400'>
+                            Không có lô sắp hết hạn trong ngưỡng.
+                          </td>
+                        </tr>
+                      )}
+                      {!alertsLoading &&
+                        nearExpiryAlerts.map((r, idx) => (
+                          <tr key={r.alert_id || idx} className='hover:bg-slate-50/60'>
+                            <td className='px-4 py-3 font-medium text-slate-900'>
+                              {r.item?.name || getItemName(r.item_id)}
+                            </td>
+                            <td className='px-4 py-3 text-slate-600'>{getLocName(r.location)}</td>
+                            <td className='px-4 py-3 font-mono text-xs text-slate-700'>
+                              {r.lot?.lot_code || r.lot_code || '—'}
+                            </td>
+                            <td className='px-4 py-3 text-slate-600'>
+                              {r.lot?.exp_date
+                                ? new Date(r.lot.exp_date).toLocaleDateString('vi-VN')
+                                : r.exp_date
+                                  ? new Date(r.exp_date).toLocaleDateString('vi-VN')
+                                  : '—'}
+                            </td>
+                            <td className='px-4 py-3 text-right font-medium tabular-nums text-amber-800'>
+                              {r.days_until_expiry ?? '—'}
+                            </td>
+                            <td className='px-4 py-3 text-right tabular-nums'>{r.qty_on_hand ?? '—'}</td>
+                            <td className='px-4 py-3'>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${severityColor[r.severity] || 'bg-slate-100 text-slate-600'}`}
+                              >
+                                {severityLabel[r.severity] || r.severity}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {inventoryAlertSub === 'expired' && (
+              <>
+                <div className='border-b border-red-100 bg-red-50/50 px-4 py-3'>
+                  <h3 className='text-sm font-semibold text-red-950'>Lô đã quá hạn</h3>
+                  <p className='text-xs text-red-800/90'>
+                    Sau khi xử lý thực tế (hủy, tiêu hủy), bấm <strong>Đã giải quyết</strong> để ghi nhận tiêu hủy lô và
+                    cập nhật tồn.
+                  </p>
+                </div>
+                <div className='overflow-x-auto'>
+                  <table className='w-full min-w-[800px] text-sm'>
+                    <thead className='border-b border-slate-200 bg-white text-left text-xs uppercase tracking-wide text-slate-500'>
+                      <tr>
+                        <th className='px-4 py-2.5'>Sản phẩm</th>
+                        <th className='px-4 py-2.5'>Kho</th>
+                        <th className='px-4 py-2.5'>Lô</th>
+                        <th className='px-4 py-2.5'>Hạn SD</th>
+                        <th className='px-4 py-2.5 text-right'>Quá hạn (ngày)</th>
+                        <th className='px-4 py-2.5 text-right'>SL tồn</th>
+                        <th className='px-4 py-2.5 text-right'>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className='divide-y divide-slate-100'>
+                      {alertsLoading && (
+                        <tr>
+                          <td colSpan={7} className='px-4 py-8 text-center text-slate-400'>
+                            Đang tải...
+                          </td>
+                        </tr>
+                      )}
+                      {!alertsLoading && !expiredAlerts.length && (
+                        <tr>
+                          <td colSpan={7} className='px-4 py-8 text-center text-slate-400'>
+                            Không có lô quá hạn còn tồn.
+                          </td>
+                        </tr>
+                      )}
+                      {!alertsLoading &&
+                        expiredAlerts.map((r, idx) => {
+                          const lotId = r.lot?._id || r.lot_id?._id || r.lot_id;
+                          const daysOver = r.days_until_expiry != null ? Math.abs(r.days_until_expiry) : '—';
+                          return (
+                            <tr key={r.alert_id || idx} className='bg-red-50/20 hover:bg-red-50/40'>
+                              <td className='px-4 py-3 font-medium text-slate-900'>
+                                {r.item?.name || getItemName(r.item_id)}
+                              </td>
+                              <td className='px-4 py-3 text-slate-600'>{getLocName(r.location)}</td>
+                              <td className='px-4 py-3 font-mono text-xs text-slate-700'>
+                                {r.lot?.lot_code || r.lot_code || '—'}
+                              </td>
+                              <td className='px-4 py-3 text-red-800'>
+                                {r.lot?.exp_date
+                                  ? new Date(r.lot.exp_date).toLocaleDateString('vi-VN')
+                                  : r.exp_date
+                                    ? new Date(r.exp_date).toLocaleDateString('vi-VN')
+                                    : '—'}
+                              </td>
+                              <td className='px-4 py-3 text-right font-semibold tabular-nums text-red-700'>
+                                {daysOver}
+                              </td>
+                              <td className='px-4 py-3 text-right tabular-nums font-medium'>{r.qty_on_hand ?? '—'}</td>
+                              <td className='px-4 py-3 text-right'>
+                                {canAdjust && lotId ? (
+                                  <button
+                                    type='button'
+                                    disabled={disposingLotId === lotId}
+                                    onClick={() => handleDisposeExpiredAlert(r)}
+                                    className='inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50'
+                                  >
+                                    <CheckCircle2 className='h-3.5 w-3.5' />
+                                    {disposingLotId === lotId ? 'Đang xử lý...' : 'Đã giải quyết'}
+                                  </button>
+                                ) : (
+                                  <span className='text-xs text-slate-400'>
+                                    {!lotId ? 'Thiếu mã lô' : 'Không quyền'}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

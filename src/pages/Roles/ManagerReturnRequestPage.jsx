@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { RefreshCcw, Search } from 'lucide-react';
 import { workflowService } from '../../services/workflowService';
+import { resolvePhotoUrl } from '../../utils/photoHelpers';
 
 const RETURN_STATUS = {
   PENDING: 'Chờ duyệt',
@@ -35,7 +37,34 @@ const DISPOSITION_TYPES = {
   RETURN_TO_SUPPLIER: 'Trả nhà cung cấp',
 };
 
+const ORDER_STATUS_VI = {
+  DRAFT: 'Nháp',
+  SUBMITTED: 'Đã gửi',
+  APPROVED: 'Đã duyệt',
+  PROCESSING: 'Đang xử lý',
+  SHIPPED: 'Đã giao',
+  RECEIVED: 'Đã nhận',
+  CANCELLED: 'Đã hủy',
+};
+
 const PAGE_SIZE = 10;
+
+const normalizeEvidenceUrl = evidence => {
+  if (!evidence) return '';
+  if (typeof evidence === 'string') return resolvePhotoUrl(evidence);
+  if (typeof evidence === 'object') {
+    const raw =
+      evidence.photo_url ||
+      evidence.url ||
+      evidence.secure_url ||
+      evidence.path ||
+      evidence.file_path ||
+      evidence.image_url ||
+      '';
+    return resolvePhotoUrl(raw);
+  }
+  return '';
+};
 
 export default function ManagerReturnRequestPage() {
   const [returns, setReturns] = useState([]);
@@ -50,13 +79,11 @@ export default function ManagerReturnRequestPage() {
   const [detailReturn, setDetailReturn] = useState(null);
   const [detailError, setDetailError] = useState(null);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [replacementOrderInfo, setReplacementOrderInfo] = useState(null);
 
   // Reject modal
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNotes, setRejectNotes] = useState('');
-  const [processError, setProcessError] = useState('');
-  const [inventoryCheck, setInventoryCheck] = useState(null);
-  const [inventoryCheckLoading, setInventoryCheckLoading] = useState(false);
 
   /* ─── Load list ─── */
   const loadReturns = async (page = 1) => {
@@ -90,8 +117,7 @@ export default function ManagerReturnRequestPage() {
     setDetailId(id);
     setDetailReturn(null);
     setDetailError(null);
-    setProcessError('');
-    setInventoryCheck(null);
+    setReplacementOrderInfo(null);
     setRejectOpen(false);
     setRejectNotes('');
     if (!id) return;
@@ -102,6 +128,15 @@ export default function ManagerReturnRequestPage() {
         : Array.isArray(data.return_lines) ? data.return_lines
         : [];
       setDetailReturn({ ...data, lines });
+      const replacementId = typeof data.replacement_order_id === 'object'
+        ? data.replacement_order_id?._id
+        : data.replacement_order_id;
+      if (replacementId) {
+        const orderRes = await workflowService.getInternalOrder(replacementId);
+        if (orderRes.success && orderRes.data) {
+          setReplacementOrderInfo(orderRes.data);
+        }
+      }
     } else {
       setDetailError(res.message || 'Không tìm thấy yêu cầu trả hàng');
     }
@@ -119,7 +154,7 @@ export default function ManagerReturnRequestPage() {
     try {
       const res = await workflowService.reviewReturnRequest(ret._id, { action: 'APPROVE' });
       if (res.success) {
-        setSuccess(`Đã phê duyệt yêu cầu ${ret.return_no || ret._id}.`);
+        setSuccess(`Đã chấp nhận yêu cầu ${ret.return_no || ret._id}. Đơn bù đã vào hàng đợi sản xuất (nếu tạo thành công).`);
         await loadDetail(ret._id);
         loadReturns(pagination.page);
       } else alert(res.message || 'Phê duyệt thất bại');
@@ -148,36 +183,6 @@ export default function ManagerReturnRequestPage() {
       } else alert(res.message || 'Từ chối thất bại');
     } catch (err) {
       alert(err?.response?.data?.message || 'Từ chối thất bại');
-    } finally {
-      setActionLoadingId(null);
-    }
-  };
-
-  const handleProcess = async ret => {
-    setActionLoadingId(ret._id);
-    setSuccess('');
-    setProcessError('');
-    try {
-      const res = await workflowService.processReturnRequest(ret._id);
-      if (res.success) {
-        setSuccess(`Đã xử lý hoàn thành. Tồn kho cửa hàng đã được trừ.`);
-        await loadDetail(ret._id);
-        loadReturns(pagination.page);
-      } else {
-        const msg = String(res.message || 'Xử lý thất bại');
-        const friendly =
-          msg.toLowerCase().includes('inventory balance not found') || msg.toLowerCase().includes('balance not found')
-            ? 'Không tìm thấy tồn kho tại cửa hàng. Có thể phiếu nhận hàng chưa được xác nhận, hoặc cửa hàng không đúng. Vui lòng kiểm tra phiếu nhận hàng đã xác nhận và tồn kho cửa hàng.'
-            : msg;
-        setProcessError(friendly);
-      }
-    } catch (err) {
-      const msg = String(err?.response?.data?.message || err?.message || 'Xử lý thất bại');
-      const friendly =
-        msg.toLowerCase().includes('inventory balance not found') || msg.toLowerCase().includes('balance not found')
-          ? 'Không tìm thấy tồn kho tại cửa hàng. Có thể phiếu nhận hàng chưa được xác nhận, hoặc cửa hàng không đúng. Vui lòng kiểm tra phiếu nhận hàng đã xác nhận và tồn kho cửa hàng.'
-          : msg;
-      setProcessError(friendly);
     } finally {
       setActionLoadingId(null);
     }
@@ -216,41 +221,6 @@ export default function ManagerReturnRequestPage() {
     return obj;
   };
 
-  const handleCheckInventory = async ret => {
-    const storeOrgId = ret.store_org_unit_id?._id || ret.store_org_unit_id;
-    if (!storeOrgId) return;
-    setInventoryCheckLoading(true);
-    setInventoryCheck(null);
-    try {
-      const locRes = await workflowService.getLocations({ org_unit_id: storeOrgId, limit: 20 });
-      const locs = Array.isArray(locRes?.data) ? locRes.data : locRes?.data?.data ?? [];
-      const locIds = locs.map(l => l._id).filter(Boolean);
-      if (!locIds.length) {
-        setInventoryCheck({ error: 'Không tìm thấy vị trí kho của cửa hàng.' });
-        return;
-      }
-      const itemIds = [...new Set((ret.lines || []).map(l => l.item_id?._id || l.item_id).filter(Boolean))];
-      const balRes = await workflowService.getInventoryBalances({
-        location_id: locIds[0],
-        limit: 100,
-      });
-      const raw = balRes?.data;
-      const list = Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [];
-      const relevant = itemIds.length
-        ? list.filter(b => itemIds.includes(b.item_id?._id || b.item_id))
-        : list;
-      setInventoryCheck({
-        locations: locs,
-        balances: relevant,
-        allBalances: list,
-      });
-    } catch (e) {
-      setInventoryCheck({ error: e?.message || 'Không thể tải tồn kho.' });
-    } finally {
-      setInventoryCheckLoading(false);
-    }
-  };
-
   const pendingCount = returns.filter(r => r.status === 'PENDING').length;
 
   return (
@@ -267,7 +237,8 @@ export default function ManagerReturnRequestPage() {
         <div>
           <h1 className='text-2xl font-bold text-slate-900'>Xử lý trả hàng</h1>
           <p className='mt-1 text-sm text-slate-500'>
-            Phê duyệt, từ chối hoặc xử lý yêu cầu trả hàng từ các cửa hàng.
+            Xem bằng chứng và hàng trả từ cửa hàng. <strong className='font-medium text-slate-700'>Chấp nhận</strong> nếu đồng ý — hệ thống tạo đơn nội bộ bù (miễn phí), đơn vào hàng đợi sản xuất và xử lý như đơn hàng bếp thường.
+            {' '}<strong className='font-medium text-slate-700'>Từ chối</strong> nếu không chấp nhận trả. Sau khi chấp nhận và hàng đã về cửa hàng, dùng bước xử lý để trừ tồn theo lô trả.
             {pendingCount > 0 && (
               <span className='ml-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700'>
                 {pendingCount} chờ duyệt
@@ -370,6 +341,16 @@ export default function ManagerReturnRequestPage() {
                     </span>
                     <span className='text-slate-500'>Lý do:</span>
                     <span>{detailReturn.reason || '-'}</span>
+                    {detailReturn.replacement_order_id && (
+                      <>
+                        <span className='text-slate-500'>Đơn bù / sản xuất (miễn phí):</span>
+                        <span className='font-medium text-emerald-800'>
+                          {typeof detailReturn.replacement_order_id === 'object'
+                            ? `${detailReturn.replacement_order_id.order_no || detailReturn.replacement_order_id._id} — ${detailReturn.replacement_order_id.status || ''}`
+                            : String(detailReturn.replacement_order_id)}
+                        </span>
+                      </>
+                    )}
                     {detailReturn.resolution_notes && (
                       <>
                         <span className='text-slate-500'>Ghi chú xử lý:</span>
@@ -384,7 +365,7 @@ export default function ManagerReturnRequestPage() {
                     <h3 className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-800'>Bằng chứng từ cửa hàng</h3>
                     <div className='flex flex-wrap gap-2'>
                       {detailReturn.evidence_photos.map((f, idx) => {
-                        const url = typeof f === 'string' ? f : (f?.url || f?.secure_url || '');
+                        const url = normalizeEvidenceUrl(f);
                         if (!url) return null;
                         return (
                           <a
@@ -392,13 +373,58 @@ export default function ManagerReturnRequestPage() {
                             href={url}
                             target='_blank'
                             rel='noreferrer'
-                            className='rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-700 hover:bg-amber-100'
+                            className='block overflow-hidden rounded-lg border border-amber-300 bg-white shadow-sm'
                           >
-                            Evidence {idx + 1}
+                            <img
+                              src={url}
+                              alt={`Bằng chứng ${idx + 1}`}
+                              className='h-24 w-24 object-cover'
+                              onError={e => {
+                                e.target.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling;
+                                if (fallback) fallback.classList.remove('hidden');
+                              }}
+                            />
+                            <span className='hidden px-2 py-1 text-xs font-medium text-amber-700'>
+                              Xem ảnh {idx + 1}
+                            </span>
                           </a>
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {detailReturn.status === 'PENDING' && (
+                  <div className='rounded-lg border border-sky-200 bg-sky-50/80 p-3 text-sm text-sky-900'>
+                    <p className='font-medium'>Chấp nhận hoặc từ chối</p>
+                    <p className='mt-1 text-xs leading-relaxed'>
+                      <strong>Chấp nhận</strong> — đồng ý trả hàng: tạo đơn nội bộ bù, đơn xuất hiện ở{' '}
+                      <Link to='/app/central/orders' className='font-medium underline'>
+                        Đơn hàng bếp
+                      </Link>{' '}
+                      và được sản xuất / chuẩn bị như mọi đơn khác. <strong>Từ chối</strong> — không chấp nhận yêu cầu (nhập lý do). Sau khi chấp nhận và hàng bù đã giao về cửa hàng, dùng <strong>Xử lý &amp; hoàn thành</strong> để trừ tồn kho cửa hàng theo lô trả.
+                    </p>
+                  </div>
+                )}
+
+                {detailReturn.status === 'APPROVED' && detailReturn.replacement_order_id && (
+                  <div className='rounded-lg border border-emerald-200 bg-emerald-50/80 p-3 text-sm text-emerald-900'>
+                    <p className='font-medium'>Đơn đã vào sản xuất</p>
+                    <p className='mt-1 text-xs leading-relaxed'>
+                      Yêu cầu đã được chấp nhận; đơn bù được xử lý trên bếp như đơn thường. Theo dõi tiến độ tại{' '}
+                      <Link to='/app/central/orders' className='font-medium underline'>
+                        Đơn hàng bếp
+                      </Link>
+                      .
+                    </p>
+                    {replacementOrderInfo?.status && (
+                      <p className='mt-2 rounded-md border border-emerald-200 bg-white px-2 py-1.5 text-xs text-emerald-900'>
+                        Trạng thái đơn bù hiện tại:{' '}
+                        <strong>{ORDER_STATUS_VI[replacementOrderInfo.status] || replacementOrderInfo.status}</strong>
+                        {replacementOrderInfo.status === 'RECEIVED' && ' (Cửa hàng đã nhận hàng bù)'}
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -446,54 +472,6 @@ export default function ManagerReturnRequestPage() {
                   </table>
                 </div>
 
-                {processError && (
-                  <div className='space-y-2'>
-                    <div className='rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>
-                      {processError}
-                    </div>
-                    <button
-                      type='button'
-                      disabled={inventoryCheckLoading}
-                      onClick={() => handleCheckInventory(detailReturn)}
-                      className='rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50'
-                    >
-                      {inventoryCheckLoading ? 'Đang tải...' : 'Kiểm tra tồn kho cửa hàng'}
-                    </button>
-                    {inventoryCheck && (
-                      <div className='rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm'>
-                        {inventoryCheck.error ? (
-                          <p className='text-red-600'>{inventoryCheck.error}</p>
-                        ) : (
-                          <>
-                            <p className='mb-2 font-medium text-slate-700'>Tồn kho tại cửa hàng (sản phẩm trong yêu cầu):</p>
-                            {inventoryCheck.balances?.length === 0 ? (
-                              <p className='text-amber-600'>Không có tồn kho. Phiếu nhận hàng có thể chưa được xác nhận.</p>
-                            ) : (
-                              <table className='w-full text-xs'>
-                                <thead>
-                                  <tr className='text-left text-slate-500'>
-                                    <th className='py-1 pr-2'>Sản phẩm</th>
-                                    <th className='py-1 pr-2'>Lô</th>
-                                    <th className='py-1 pr-2'>Tồn</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {inventoryCheck.balances?.map((b, i) => (
-                                    <tr key={i}>
-                                      <td className='py-1'>{getItemName(b.item_id)}</td>
-                                      <td className='py-1'>{b.lot_id?.lot_code || '(không lô)'}</td>
-                                      <td className='py-1 font-medium'>{b.qty_on_hand ?? 0}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
                 {/* Action buttons */}
                 <div className='flex flex-wrap gap-2 border-t border-slate-200 pt-4'>
                   {detailReturn.status === 'PENDING' && (
@@ -502,8 +480,9 @@ export default function ManagerReturnRequestPage() {
                         disabled={actionLoadingId === detailReturn._id}
                         onClick={() => handleApprove(detailReturn)}
                         className='rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
+                        title='Chấp nhận trả hàng và tạo đơn bù vào hàng đợi sản xuất (miễn phí)'
                       >
-                        {actionLoadingId === detailReturn._id ? 'Đang xử lý...' : 'Phê duyệt'}
+                        {actionLoadingId === detailReturn._id ? 'Đang xử lý...' : 'Chấp nhận & tạo đơn sản xuất bù'}
                       </button>
                       <button
                         disabled={actionLoadingId === detailReturn._id}
@@ -513,15 +492,6 @@ export default function ManagerReturnRequestPage() {
                         Từ chối
                       </button>
                     </>
-                  )}
-                  {detailReturn.status === 'APPROVED' && (
-                    <button
-                      disabled={actionLoadingId === detailReturn._id}
-                      onClick={() => handleProcess(detailReturn)}
-                      className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
-                    >
-                      {actionLoadingId === detailReturn._id ? 'Đang xử lý...' : 'Xử lý & hoàn thành (trừ tồn kho)'}
-                    </button>
                   )}
                   {['PENDING', 'APPROVED'].includes(detailReturn.status) && (
                     <button

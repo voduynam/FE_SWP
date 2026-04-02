@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PlusCircle, RefreshCcw, Search, X } from 'lucide-react';
+import ModalPortal from '../../components/ui/ModalPortal';
 import { workflowService } from '../../services/workflowService';
 
 const getRows = data => {
@@ -147,8 +148,9 @@ export default function AdminSuppliersPage() {
       </div>
 
       {showCreate && (
+        <ModalPortal>
         <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => !saving && setShowCreate(false)}
         >
           <div
@@ -250,6 +252,7 @@ export default function AdminSuppliersPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

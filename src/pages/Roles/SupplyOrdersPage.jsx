@@ -18,6 +18,21 @@ const prodStatusColor = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+function formatVnd(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '-';
+  return `${v.toLocaleString('vi-VN')} đ`;
+}
+
+/** Thông tin COD từ đơn nội bộ (getInternalOrder) */
+function getCodSummary(pay) {
+  if (!pay || pay.payment_method !== 'COD') return null;
+  const amount = Number(pay.total_amount ?? 0);
+  const status = pay.payment_status || '';
+  const collected = ['COD_COLLECTED', 'COD_CONFIRMED', 'PAID'].includes(status);
+  return { amount, collected, status };
+}
+
 function getItemName(row) {
   if (!row) return '-';
   if (row.item_name) return row.item_name;
@@ -45,6 +60,8 @@ export default function SupplyOrdersPage() {
   const [detailId, setDetailId] = useState(null);
   const [detailData, setDetailData] = useState(null);
   const [detailError, setDetailError] = useState(null);
+  const [orderPaymentById, setOrderPaymentById] = useState({});
+  const [detailPaymentLoading, setDetailPaymentLoading] = useState(false);
 
   const loadData = useCallback(async (page = 1) => {
     setLoading(true);
@@ -82,22 +99,73 @@ export default function SupplyOrdersPage() {
     });
   }, [rows, search]);
 
-  /* ─── Detail ─── */
+  /* ─── Detail (BE không có GET theo id — lấy từ danh sách / refetch theo ngày) ─── */
   const loadDetail = async id => {
     setDetailId(id);
     setDetailData(null);
     setDetailError(null);
+    setOrderPaymentById({});
     if (!id) return;
-    const res = await workflowService.getConsolidatedOrder(id);
-    if (res.success && res.data) {
-      const d = Array.isArray(res.data) ? res.data[0] : res.data;
-      setDetailData(d || null);
-    } else {
-      setDetailError(res.message || 'Không tìm thấy dữ liệu');
+    let row = rows.find(r => r._id === id);
+    if (!row) {
+      try {
+        const res = await workflowService.getConsolidatedOrders({
+          delivery_date: deliveryDate,
+          page: 1,
+          limit: 500,
+        });
+        const list = Array.isArray(res.data?.data)
+          ? res.data.data
+          : Array.isArray(res.data)
+            ? res.data
+            : [];
+        row = list.find(r => r._id === id);
+      } catch {
+        row = null;
+      }
+    }
+    if (!row) {
+      setDetailError('Không tìm thấy dữ liệu');
+      return;
+    }
+    setDetailData(row);
+
+    const orderIds = new Set();
+    (row.stores || []).forEach(s => {
+      const orderObj = s?.order_id && typeof s.order_id === 'object' ? s.order_id : null;
+      const oid =
+        orderObj?._id ??
+        orderObj?.id ??
+        (typeof s?.order_id === 'string' ? s.order_id : null);
+      if (oid) orderIds.add(String(oid));
+    });
+    if (orderIds.size === 0) return;
+
+    setDetailPaymentLoading(true);
+    try {
+      const entries = await Promise.all(
+        [...orderIds].map(async oid => {
+          const res = await workflowService.getInternalOrder(oid);
+          return [oid, res.success && res.data ? res.data : null];
+        }),
+      );
+      const map = {};
+      entries.forEach(([k, v]) => {
+        if (v) map[k] = v;
+      });
+      setOrderPaymentById(map);
+    } finally {
+      setDetailPaymentLoading(false);
     }
   };
 
-  const closeDetail = () => setDetailId(null);
+  const closeDetail = () => {
+    setDetailId(null);
+    setDetailData(null);
+    setDetailError(null);
+    setOrderPaymentById({});
+    setDetailPaymentLoading(false);
+  };
 
   const shipmentOrders = useMemo(() => {
     if (!(detailData?.stores || []).length) return [];
@@ -107,17 +175,22 @@ export default function SupplyOrdersPage() {
       const orderObj = s?.order_id && typeof s.order_id === 'object' ? s.order_id : null;
       const orderId = orderObj?._id ?? orderObj?.id ?? (typeof s?.order_id === 'string' ? s.order_id : null);
       if (!orderId) return;
-      if (byId.has(String(orderId))) return;
+      const idStr = String(orderId);
+      if (byId.has(idStr)) return;
 
-      byId.set(String(orderId), {
-        _id: String(orderId),
-        order_no: orderObj?.order_no || String(orderId),
-        status: orderObj?.status || '',
+      const pay = orderPaymentById[idStr];
+      byId.set(idStr, {
+        _id: idStr,
+        order_no: orderObj?.order_no || pay?.order_no || idStr,
+        status: orderObj?.status || pay?.status || '',
+        payment_method: pay?.payment_method,
+        payment_status: pay?.payment_status,
+        total_amount: pay?.total_amount,
       });
     });
 
     return Array.from(byId.values());
-  }, [detailData]);
+  }, [detailData, orderPaymentById]);
 
   const handleCreateShipmentFromOrder = (orderId) => {
     if (!orderId) return;
@@ -143,7 +216,7 @@ export default function SupplyOrdersPage() {
           <p className='mt-1 text-sm text-slate-500'>Tổng hợp nhu cầu theo ngày giao, kiểm tra tồn kho và trạng thái sản xuất.</p>
         </div>
         <div className='flex gap-2'>
-          <input type='date' value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className='input-field' />
+          <input type='date' value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} className='input-field w-full' />
           <button onClick={handleGenerate} className='inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600'>Generate</button>
           <button onClick={() => loadData()} className='inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50'>
             <RefreshCcw className='h-4 w-4' /> Làm mới
@@ -220,6 +293,9 @@ export default function SupplyOrdersPage() {
 
             {!detailData && !detailError && <p className='text-sm text-slate-500'>Đang tải...</p>}
             {detailError && <p className='text-sm text-red-600'>{detailError}</p>}
+            {detailData && detailPaymentLoading && (
+              <p className='mb-2 text-xs text-slate-500'>Đang tải thông tin thanh toán / COD...</p>
+            )}
             {detailData && (
               <div className='space-y-4'>
                 {/* Summary */}
@@ -262,6 +338,7 @@ export default function SupplyOrdersPage() {
                           <th className='px-3 py-2'>Cửa hàng</th>
                           <th className='px-3 py-2'>Đơn hàng</th>
                           <th className='px-3 py-2 text-right'>Số lượng</th>
+                          <th className='px-3 py-2'>Thu hộ (COD)</th>
                         </tr>
                       </thead>
                       <tbody className='divide-y divide-slate-100'>
@@ -269,15 +346,46 @@ export default function SupplyOrdersPage() {
                           const storeName = s.store_id && typeof s.store_id === 'object'
                             ? (s.store_id.name || s.store_id.code || s.store_id._id)
                             : (s.store_id || '-');
-                          const orderNo = s.order_id && typeof s.order_id === 'object'
-                            ? (s.order_id.order_no || s.order_id._id)
+                          const orderObj = s.order_id && typeof s.order_id === 'object' ? s.order_id : null;
+                          const oid =
+                            orderObj?._id ??
+                            orderObj?.id ??
+                            (typeof s?.order_id === 'string' ? s.order_id : null);
+                          const orderNo = orderObj
+                            ? (orderObj.order_no || orderObj._id)
                             : (s.order_id || '-');
+                          const pay = oid ? orderPaymentById[String(oid)] : null;
+                          const cod = getCodSummary(pay);
                           return (
                             <tr key={idx}>
                               <td className='px-3 py-2 text-slate-400'>{idx + 1}</td>
                               <td className='px-3 py-2 font-medium text-slate-800'>{storeName}</td>
                               <td className='px-3 py-2 text-slate-700'>{orderNo}</td>
                               <td className='px-3 py-2 text-right text-slate-700'>{s.qty ?? '-'}</td>
+                              <td className='px-3 py-2 align-top'>
+                                {!pay && detailPaymentLoading && (
+                                  <span className='text-xs text-slate-400'>...</span>
+                                )}
+                                {pay && !cod && (
+                                  <span className='text-xs text-slate-500'>Không phải COD</span>
+                                )}
+                                {cod && (
+                                  <div className='space-y-1'>
+                                    <div className='font-medium text-amber-900'>
+                                      {formatVnd(cod.amount)}
+                                    </div>
+                                    {cod.collected ? (
+                                      <span className='inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800'>
+                                        Đã thu COD thành công
+                                      </span>
+                                    ) : (
+                                      <span className='text-[11px] text-amber-800'>
+                                        Chờ thu khi giao
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
@@ -294,17 +402,34 @@ export default function SupplyOrdersPage() {
                     <div className='space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3'>
                       {shipmentOrders.map(o => {
                         const eligible = ['APPROVED', 'PROCESSING'].includes(o.status);
+                        const cod = getCodSummary(o);
                         return (
-                          <div key={o._id} className='flex flex-wrap items-center justify-between gap-2'>
-                            <div className='text-sm'>
+                          <div
+                            key={o._id}
+                            className='flex flex-col gap-2 rounded-lg border border-slate-100 bg-white p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between'
+                          >
+                            <div className='min-w-0 flex-1 text-sm'>
                               <div className='font-medium text-slate-800'>{o.order_no}</div>
                               <div className='text-xs text-slate-500'>Trạng thái: {o.status || '-'}</div>
+                              {cod && (
+                                <div className='mt-2 rounded-md border border-amber-200 bg-amber-50/80 px-2 py-1.5 text-xs'>
+                                  <span className='font-semibold text-amber-900'>COD — thu hộ: </span>
+                                  <span className='text-amber-950'>{formatVnd(cod.amount)}</span>
+                                  {cod.collected ? (
+                                    <span className='ml-2 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800'>
+                                      Đã thu thành công
+                                    </span>
+                                  ) : (
+                                    <span className='ml-2 text-amber-800'>Chờ thu khi giao</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <button
                               type='button'
                               disabled={!eligible}
                               onClick={() => handleCreateShipmentFromOrder(o._id)}
-                              className='rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
+                              className='shrink-0 rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-orange-600 disabled:opacity-60'
                             >
                               Tạo phiếu giao
                             </button>

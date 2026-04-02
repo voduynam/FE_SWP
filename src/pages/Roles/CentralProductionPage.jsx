@@ -72,6 +72,14 @@ export default function CentralProductionPage() {
   const [newLotForm, setNewLotForm] = useState({ lot_code: '', mfg_date: '', exp_date: '' });
   const [newLotSaving, setNewLotSaving] = useState(false);
   const [newLotError, setNewLotError] = useState('');
+  /** Kho nguyên liệu (RAW) — BE bắt buộc location_id khi tạo material request */
+  const [defaultRawLocationId, setDefaultRawLocationId] = useState('');
+  const [requestingManagerMaterial, setRequestingManagerMaterial] = useState(false);
+  /** Popup thay cho window.alert */
+  const [noticeAlert, setNoticeAlert] = useState(null);
+  const showAppAlert = (message, variant = 'info') => {
+    setNoticeAlert({ message: String(message ?? ''), variant: variant === 'error' ? 'error' : 'info' });
+  };
 
   const loadOrders = async (page = 1) => {
     setLoading(true);
@@ -93,7 +101,7 @@ export default function CentralProductionPage() {
           pages: p.pages ?? 1,
         });
       } else setOrders([]);
-    } catch (e) {
+    } catch {
       setOrders([]);
     } finally {
       setLoading(false);
@@ -116,6 +124,22 @@ export default function CentralProductionPage() {
   useEffect(() => {
     loadOrders(1);
   }, [statusFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await workflowService.getLocations({ status: 'ACTIVE', limit: 200 });
+      const list = getList(res);
+      if (cancelled) return;
+      const pick = list.find(l => {
+        const code = (l.code || '').toString();
+        const name = (l.name || '').toString();
+        return /RAW|NGUYÊN|NGUYEN|KHO NL|MATERIAL|NGUYEN LIEU/i.test(`${code} ${name}`);
+      });
+      setDefaultRawLocationId(pick?._id || list[0]?._id || '');
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [searchParams] = useSearchParams();
   const [pendingInternalOrderId, setPendingInternalOrderId] = useState(null);
@@ -332,9 +356,9 @@ export default function CentralProductionPage() {
         setDetailOrder(prev => (prev?._id === order._id ? { ...prev, status: newStatus, ...extra } : prev));
         setSuccess(`Đã cập nhật trạng thái: ${PROD_STATUS[newStatus] || newStatus}.`);
         loadOrders(pagination.page).catch(() => {});
-      } else alert(res.message || 'Cập nhật thất bại');
+      } else showAppAlert(res.message || 'Cập nhật thất bại', 'error');
     } catch (err) {
-      alert(err?.response?.data?.message || 'Cập nhật thất bại');
+      showAppAlert(err?.response?.data?.message || 'Cập nhật thất bại', 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -351,7 +375,7 @@ export default function CentralProductionPage() {
     if (!Array.isArray(raw)) return [];
     return raw
       .map(it => ({
-        item_id: it.item_id?._id || it.item_id,
+        item_id: it.item_id?._id || it.item_id || it.item?._id || it.item,
         shortage_qty: Number(it.shortage_qty ?? it.missing_qty ?? it.variance_qty ?? 0),
       }))
       .filter(it => it.item_id && it.shortage_qty > 0);
@@ -364,7 +388,7 @@ export default function CentralProductionPage() {
     try {
       const res = await workflowService.getProductionVarianceCheck(detailOrder._id);
       if (res.success) setVarianceInfo(res.data);
-      else alert(res.message || 'Không kiểm tra được thiếu hụt');
+      else showAppAlert(res.message || 'Không kiểm tra được thiếu hụt', 'error');
     } finally {
       setCheckingVariance(false);
     }
@@ -374,7 +398,7 @@ export default function CentralProductionPage() {
     if (!detailOrder?._id || !varianceInfo) return;
     const shortageItems = getShortageItems(varianceInfo);
     if (!shortageItems.length) {
-      alert('Không có thiếu hụt cần bù.');
+      showAppAlert('Không có thiếu hụt cần bù.');
       return;
     }
     setCreatingCompensation(true);
@@ -385,26 +409,45 @@ export default function CentralProductionPage() {
         priority: 'URGENT',
       });
       if (!res.success) {
-        alert(res.message || 'Tạo đơn bù thất bại');
+        showAppAlert(res.message || 'Tạo đơn bù thất bại', 'error');
         return;
       }
-      // Gửi material request nhanh nếu đơn bù phát sinh thiếu nguyên liệu.
-      await workflowService.createMaterialRequest({
-        priority: 'URGENT',
-        request_reason: 'PRODUCTION_SHORTAGE',
-        production_order_id: detailOrder._id,
-        notes: 'Yêu cầu bổ sung nguyên liệu do thiếu hụt sản xuất.',
-        lines: shortageItems.map(s => ({
+      // Gửi material request nhanh nếu đơn bù phát sinh thiếu nguyên liệu (BE yêu cầu location_id + uom_id từng dòng).
+      const mrLines = shortageItems.map(s => {
+        const it = items.find(i => i._id === s.item_id);
+        const uomId = it?.base_uom_id?._id ?? it?.base_uom_id ?? '';
+        return {
           item_id: s.item_id,
+          uom_id: uomId,
           quantity_requested: s.shortage_qty,
+          minimum_required: s.shortage_qty,
           urgency_level: 'CRITICAL',
           reason: 'Bù thiếu hụt sản xuất',
-        })),
+        };
       });
-      setSuccess('Đã tạo đơn sản xuất bù thiếu hụt và gửi yêu cầu nguyên liệu nhanh cho Manager.');
+      if (!defaultRawLocationId) {
+        setSuccess('Đã tạo đơn sản xuất bù thiếu hụt. Chưa gửi yêu cầu nguyên liệu: chưa xác định kho RAW trong Master.');
+      } else if (mrLines.some(l => !l.uom_id)) {
+        setSuccess('Đã tạo đơn sản xuất bù thiếu hụt. Chưa gửi yêu cầu nguyên liệu: thiếu đơn vị tính (base UOM) cho một số mặt hàng.');
+      } else {
+        const mrRes = await workflowService.createMaterialRequest({
+          priority: 'URGENT',
+          request_reason: 'PRODUCTION_SHORTAGE',
+          production_order_id: detailOrder._id,
+          location_id: defaultRawLocationId,
+          notes: 'Yêu cầu bổ sung nguyên liệu do thiếu hụt sản xuất.',
+          lines: mrLines,
+        });
+        if (!mrRes.success) {
+          setSuccess('Đã tạo đơn sản xuất bù thiếu hụt.');
+          showAppAlert(mrRes.message || 'Đã bù thiếu hụt nhưng gửi yêu cầu nguyên liệu thất bại.', 'error');
+        } else {
+          setSuccess('Đã tạo đơn sản xuất bù thiếu hụt và gửi yêu cầu nguyên liệu nhanh cho Manager.');
+        }
+      }
       await loadOrders(pagination.page);
     } catch (error) {
-      alert(error?.response?.data?.message || 'Không thể xử lý bù thiếu hụt');
+      showAppAlert(error?.response?.data?.message || 'Không thể xử lý bù thiếu hụt', 'error');
     } finally {
       setCreatingCompensation(false);
     }
@@ -481,7 +524,7 @@ export default function CentralProductionPage() {
       }
       const lines = res.data.lines;
       setRecipeMaterials(lines);
-      const plannedQty = Number(line?.planned_qty) ?? 1;
+      const plannedQty = Number(line?.planned_qty) || 1;
       const rows = lines.map(m => {
         const matId = m.material_item_id?._id ?? m.material_item_id;
         const uomId = m.uom_id?._id ?? m.uom_id;
@@ -551,14 +594,14 @@ export default function CentralProductionPage() {
   const submitConsumption = async e => {
     e.preventDefault();
     if (!detailId || !consumptionForm.prod_order_line_id) {
-      alert('Vui lòng chọn Dòng sản xuất.');
+      showAppAlert('Vui lòng chọn Dòng sản xuất.');
       return;
     }
     const toSend = consumptionRows
       .map((r, i) => ({ ...r, qty: Number(r.qty), _idx: i }))
       .filter(r => Number.isFinite(r.qty) && r.qty > 0);
     if (!toSend.length) {
-      alert('Nhập ít nhất một dòng có Số lượng tiêu hao > 0.');
+      showAppAlert('Nhập ít nhất một dòng có Số lượng tiêu hao > 0.');
       return;
     }
 
@@ -570,7 +613,8 @@ export default function CentralProductionPage() {
         ...(row.lot_id ? { lot_id: row.lot_id } : {}),
         limit: 50,
       });
-      const list = Array.isArray(res?.data) ? res.data : [];
+      const rawList = res?.data;
+      const list = Array.isArray(rawList) ? rawList : (Array.isArray(rawList?.data) ? rawList.data : []);
       const rawBalance = list.find(b => {
         const loc = b.location_id;
         const code = (loc?.code || '').toString();
@@ -582,8 +626,21 @@ export default function CentralProductionPage() {
       });
       const onHand = rawBalance?.qty_on_hand ?? 0;
       if (onHand < row.qty) {
-        const itemName = getItemName(recipeMaterials[row._idx]?.material_item_id) || row.material_item_id;
-        insufficient.push({ item: itemName, onHand, need: row.qty });
+        const rm = recipeMaterials[row._idx];
+        const itemName = getItemName(rm?.material_item_id) || row.material_item_id;
+        const uomFromRow = typeof row.uom_id === 'object' && row.uom_id !== null ? row.uom_id?._id : row.uom_id;
+        const uomFromRecipe = rm?.uom_id?._id ?? rm?.uom_id;
+        const itemMeta = items.find(i => i._id === row.material_item_id);
+        const uomId = uomFromRow || uomFromRecipe || itemMeta?.base_uom_id?._id || itemMeta?.base_uom_id || '';
+        const shortageQty = Math.max(0, Number((row.qty - onHand).toFixed(6)));
+        insufficient.push({
+          item: itemName,
+          onHand,
+          need: row.qty,
+          material_item_id: row.material_item_id,
+          uom_id: uomId,
+          shortage_qty: shortageQty,
+        });
       }
     }
     if (insufficient.length > 0) {
@@ -622,7 +679,7 @@ export default function CentralProductionPage() {
       setLotsByItemId({});
       loadDetail(detailId);
     } catch (err) {
-      alert(err?.response?.data?.message || 'Ghi nhận thất bại');
+      showAppAlert(err?.response?.data?.message || 'Ghi nhận thất bại', 'error');
     } finally {
       setCreating(false);
     }
@@ -634,28 +691,69 @@ export default function CentralProductionPage() {
     }
   };
 
+  const requestManagerMaterialFromShortage = async () => {
+    const data = consumptionPendingData;
+    if (!data?.insufficient?.length || !detailOrder?._id) return;
+    if (!defaultRawLocationId) {
+      showAppAlert('Chưa xác định được kho nguyên liệu (RAW). Vui lòng cấu hình Location trong Master Data.');
+      return;
+    }
+    const bad = data.insufficient.find(i => !i.material_item_id || !i.uom_id || !(Number(i.shortage_qty) > 0));
+    if (bad) {
+      showAppAlert('Không đủ thông tin để gửi yêu cầu (mặt hàng / ĐVT / số lượng thiếu).');
+      return;
+    }
+    setRequestingManagerMaterial(true);
+    try {
+      const res = await workflowService.createMaterialRequest({
+        priority: 'URGENT',
+        request_reason: 'PRODUCTION_SHORTAGE',
+        production_order_id: detailOrder._id,
+        location_id: defaultRawLocationId,
+        notes: `Yêu cầu Manager nhập/bổ sung nguyên liệu nhanh — thiếu tồn khi ghi nhận tiêu hao (đơn ${detailOrder.order_no || detailOrder._id}).`,
+        lines: data.insufficient.map(s => ({
+          item_id: s.material_item_id,
+          uom_id: s.uom_id,
+          quantity_requested: s.shortage_qty,
+          minimum_required: s.shortage_qty,
+          urgency_level: 'HIGH',
+          reason: 'Thiếu tồn kho nguyên liệu khi ghi nhận tiêu hao',
+        })),
+      });
+      if (!res.success) {
+        showAppAlert(res.message || 'Gửi yêu cầu thất bại', 'error');
+        return;
+      }
+      setSuccess('Đã gửi yêu cầu Manager nhập nguyên liệu nhanh. Bạn có thể chờ bổ sung tồn hoặc tiếp tục ghi nhận nếu được phép.');
+    } catch (err) {
+      showAppAlert(err?.response?.data?.message || err?.message || 'Không gửi được yêu cầu', 'error');
+    } finally {
+      setRequestingManagerMaterial(false);
+    }
+  };
+
   const submitOutput = async e => {
     e.preventDefault();
     let qty = Number(outputForm.qty);
     if (!detailId || !outputForm.prod_order_line_id || !outputForm.lot_id || !outputForm.uom_id) {
-      alert('Vui lòng điền đủ: dòng sản xuất, lô, số lượng, ĐVT.');
+      showAppAlert('Vui lòng điền đủ: dòng sản xuất, lô, số lượng, ĐVT.');
       return;
     }
     if (!Number.isFinite(qty) || qty <= 0) {
-      alert('Số lượng đầu ra phải lớn hơn 0.');
+      showAppAlert('Số lượng đầu ra phải lớn hơn 0.');
       return;
     }
     if (isOutputLineDiscreteUom()) {
       qty = Math.round(qty);
       if (qty < 1) {
-        alert('Số lượng đầu ra (đơn vị túi/cái) phải là số nguyên lớn hơn 0.');
+        showAppAlert('Số lượng đầu ra (đơn vị túi/cái) phải là số nguyên lớn hơn 0.');
         return;
       }
     }
 
     const plannedQty = getOutputLinePlannedQty();
     if (plannedQty > 0 && qty > plannedQty) {
-      alert(`Số lượng đầu ra (${qty}) không được lớn hơn số lượng kế hoạch (${plannedQty}).`);
+      showAppAlert(`Số lượng đầu ra (${qty}) không được lớn hơn số lượng kế hoạch (${plannedQty}).`);
       return;
     }
     setCreating(true);
@@ -671,9 +769,9 @@ export default function CentralProductionPage() {
         setShowOutput(false);
         setOutputForm({ prod_order_line_id: '', lot_id: '', qty: 0, uom_id: '' });
         loadDetail(detailId);
-      } else alert(res.message || 'Ghi nhận thất bại');
+      } else showAppAlert(res.message || 'Ghi nhận thất bại', 'error');
     } catch (err) {
-      alert(err?.response?.data?.message || 'Ghi nhận thất bại');
+      showAppAlert(err?.response?.data?.message || 'Ghi nhận thất bại', 'error');
     } finally {
       setCreating(false);
     }
@@ -885,7 +983,7 @@ export default function CentralProductionPage() {
                       {varianceInfo && (
                         <div className='rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800'>
                           <p className='font-semibold'>Kết quả kiểm tra thiếu hụt đã cập nhật.</p>
-                          <p className='mt-1'>Nếu có thiếu hụt, bấm tạo đơn bù để Chef sản xuất bổ sung.</p>
+                          <p className='mt-1'>Nếu có thiếu hụt, bấm tạo đơn bù để sản xuất bổ sung.</p>
                           <button
                             type='button'
                             onClick={handleCompensateShortage}
@@ -904,6 +1002,39 @@ export default function CentralProductionPage() {
                     </div>
                   );
                 })()}
+
+                {detailOrder.status === 'DONE' && (
+                  <div className='rounded-lg border border-emerald-200 bg-emerald-50/90 p-3'>
+                    <p className='text-sm font-medium text-emerald-900'>Đơn đã hoàn thành</p>
+                    <p className='mt-1 text-xs text-emerald-800'>
+                      Nếu thiếu so với kế hoạch, có thể kiểm tra và tạo đơn sản xuất bù bên dưới.
+                    </p>
+                    <div className='mt-2 flex flex-wrap gap-2'>
+                      <button
+                        type='button'
+                        onClick={handleVarianceCheck}
+                        disabled={checkingVariance}
+                        className='rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800 hover:bg-amber-100 disabled:opacity-60'
+                      >
+                        {checkingVariance ? 'Đang kiểm tra...' : 'Kiểm tra thiếu hụt'}
+                      </button>
+                    </div>
+                    {varianceInfo && (
+                      <div className='mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800'>
+                        <p className='font-semibold'>Kết quả kiểm tra thiếu hụt</p>
+                        <p className='mt-1'>Có thể tạo đơn bù thiếu hụt tại đây.</p>
+                        <button
+                          type='button'
+                          onClick={handleCompensateShortage}
+                          disabled={creatingCompensation}
+                          className='mt-2 rounded bg-amber-600 px-3 py-1.5 text-white hover:bg-amber-700 disabled:opacity-60'
+                        >
+                          {creatingCompensation ? 'Đang tạo đơn bù...' : 'Tạo đơn bù thiếu hụt'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <h3 className='mb-2 text-sm font-medium text-slate-700'>Dòng sản xuất</h3>
@@ -938,10 +1069,26 @@ export default function CentralProductionPage() {
                         <p className='text-sm font-medium text-amber-800'>Không đủ tồn kho tại Kho Nguyên Liệu:</p>
                         <p className='mt-1 whitespace-pre-line text-sm text-amber-700'>{consumptionWarning}</p>
                         <p className='mt-2 text-xs text-amber-600'>Tiêu hao có thể tạo tồn âm.</p>
-                        <div className='mt-3 flex gap-2'>
-                          <button type='button' onClick={confirmConsumptionAnyway} disabled={creating} className='rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60'>Tiếp tục dù vậy</button>
-                          <button type='button' onClick={() => { setConsumptionWarning(null); setConsumptionPendingData(null); }} className='rounded border border-amber-400 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-100'>Hủy</button>
+                        {!defaultRawLocationId && (
+                          <p className='mt-2 text-xs text-amber-800'>Chưa tìm thấy kho RAW trong Master — nút gửi yêu cầu sẽ bị tắt cho đến khi có ít nhất một Location hoạt động (ưu tiên mã/tên chứa RAW hoặc nguyên liệu).</p>
+                        )}
+                        <div className='mt-3 flex flex-wrap gap-2'>
+                          <button
+                            type='button'
+                            onClick={requestManagerMaterialFromShortage}
+                            disabled={creating || requestingManagerMaterial || !defaultRawLocationId}
+                            className='rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60'
+                          >
+                            {requestingManagerMaterial ? 'Đang gửi...' : 'Gửi yêu cầu Manager nhập nguyên liệu'}
+                          </button>
+                          <button type='button' onClick={confirmConsumptionAnyway} disabled={creating || requestingManagerMaterial} className='rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60'>Tiếp tục dù vậy</button>
+                          <button type='button' onClick={() => { setConsumptionWarning(null); setConsumptionPendingData(null); }} disabled={requestingManagerMaterial} className='rounded border border-amber-400 px-3 py-1.5 text-sm text-amber-700 hover:bg-amber-100 disabled:opacity-60'>Hủy</button>
                         </div>
+                        <p className='mt-2 text-xs text-amber-800'>
+                          <Link to='/app/central/materials' className='font-medium underline hover:text-amber-900'>Nhập lô nguyên liệu</Link>
+                          <span className='mx-1.5 text-amber-500'>·</span>
+                          <Link to='/app/central/inventory' className='font-medium underline hover:text-amber-900'>Xem tồn kho</Link>
+                        </p>
                       </div>
                     )}
                     <div className='mb-3'>
@@ -971,7 +1118,14 @@ export default function CentralProductionPage() {
                                 <td className='px-3 py-2 text-slate-600'>{recipeMaterials[idx]?.uom_id?.code ?? recipeMaterials[idx]?.uom_id?.name ?? row.uom_id ?? '—'}</td>
                                 <td className='px-3 py-2 text-slate-600'>{row.qty_per_batch ?? 0}</td>
                                 <td className='px-3 py-2'>
-                                  <input type='number' min={0} step={0.01} value={row.qty} onChange={e => setConsumptionRowQty(idx, e.target.value)} className='w-24 rounded border border-slate-200 px-2 py-1 text-sm' />
+                                  <input
+                                    type='number'
+                                    min={0}
+                                    step='any'
+                                    value={row.qty}
+                                    onChange={e => setConsumptionRowQty(idx, e.target.value)}
+                                    className='w-28 rounded border border-slate-200 px-2 py-1 text-sm'
+                                  />
                                 </td>
                                 <td className='px-3 py-2'>
                                   <select value={row.lot_id} onChange={e => setConsumptionRowLot(idx, e.target.value)} className='min-w-[120px] rounded border border-slate-200 px-2 py-1 text-sm'>
@@ -1055,7 +1209,7 @@ export default function CentralProductionPage() {
                         <input
                           type='number'
                           min={isOutputLineDiscreteUom() ? 1 : 0.01}
-                          step={isOutputLineDiscreteUom() ? 1 : 0.01}
+                          step={isOutputLineDiscreteUom() ? 1 : 'any'}
                           value={outputForm.qty}
                           onChange={e => {
                             const v = e.target.value;
@@ -1210,7 +1364,7 @@ export default function CentralProductionPage() {
                     </div>
                     <div className='sm:col-span-3'>
                       <label className='block text-xs font-medium text-slate-600'>Số lượng kế hoạch</label>
-                      <input type='number' min={0.01} step={0.01} value={line.planned_qty} onChange={e => handleLineChange(idx, 'planned_qty', e.target.value)} className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm' required />
+                      <input type='number' min={0.01} step='any' value={line.planned_qty} onChange={e => handleLineChange(idx, 'planned_qty', e.target.value)} className='mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm' required />
                     </div>
                     <div className='sm:col-span-3'>
                       <label className='block text-xs font-medium text-slate-600'>ĐVT</label>
@@ -1230,6 +1384,42 @@ export default function CentralProductionPage() {
                 )}
               </div>
             </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {noticeAlert && createPortal(
+        <div
+          className='fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 p-4'
+          role='alertdialog'
+          aria-modal='true'
+          aria-labelledby='production-notice-title'
+          onClick={() => setNoticeAlert(null)}
+          onKeyDown={e => { if (e.key === 'Escape') setNoticeAlert(null); }}
+        >
+          <div
+            className={`w-full max-w-md rounded-xl bg-white p-5 shadow-xl ${
+              noticeAlert.variant === 'error' ? 'ring-2 ring-red-200' : 'ring-2 ring-slate-200'
+            }`}
+            onClick={e => e.stopPropagation()}
+          >
+            <h2
+              id='production-notice-title'
+              className={`text-lg font-semibold ${noticeAlert.variant === 'error' ? 'text-red-800' : 'text-slate-900'}`}
+            >
+              {noticeAlert.variant === 'error' ? 'Lỗi' : 'Thông báo'}
+            </h2>
+            <p className='mt-3 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm text-slate-700'>{noticeAlert.message}</p>
+            <div className='mt-5 flex justify-end'>
+              <button
+                type='button'
+                onClick={() => setNoticeAlert(null)}
+                className='rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800'
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>,
         document.body

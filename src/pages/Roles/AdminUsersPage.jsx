@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus, RefreshCcw, Search, Shield, UserCheck, UserX } from 'lucide-react';
+import ModalPortal from '../../components/ui/ModalPortal';
 import { workflowService } from '../../services/workflowService';
 
 const roleLabels = {
@@ -317,8 +318,9 @@ export default function AdminUsersPage() {
       {loading && <p className='text-sm text-slate-500'>Đang tải dữ liệu...</p>}
 
       {showCreate && (
+        <ModalPortal>
         <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => !creating && setShowCreate(false)}
         >
           <div
@@ -512,11 +514,13 @@ export default function AdminUsersPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showEdit && (
+        <ModalPortal>
         <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => {
             if (!editing) {
               setShowEdit(false);
@@ -754,11 +758,13 @@ export default function AdminUsersPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showRolesModal && rolesUser && (
+        <ModalPortal>
         <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+          className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => setShowRolesModal(false)}
         >
           <div
@@ -859,6 +865,7 @@ export default function AdminUsersPage() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       <div className='flex flex-col gap-4 sm:flex-row'>
