@@ -163,8 +163,9 @@
   }
 
   /* Form elements */
+  /* Không dùng w-full ở đây: <select> trong flex row sẽ giãn 100% và vỡ layout thanh lọc */
   .input-field {
-    @apply w-full rounded-[10px] border border-gray-200 bg-white px-4 py-2.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)] focus:outline-none focus:ring-2 focus:ring-ck-accent/20 focus:border-ck-accent/40 transition;
+    @apply rounded-[10px] border border-gray-200 bg-white px-4 py-2.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)] focus:outline-none focus:ring-2 focus:ring-ck-accent/20 focus:border-ck-accent/40 transition;
   }
 
   /* Buttons */

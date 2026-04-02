@@ -117,6 +117,9 @@ export const workflowService = {
     withResult(() => axiosInstance.post('/lots', payload)),
   updateLot: (id, payload) =>
     withResult(() => axiosInstance.put(`/lots/${id}`, payload)),
+  /** Tiêu hủy lô hết hạn / xử lý sau cảnh báo — BE: PUT /lots/:id/dispose (MANAGER, ADMIN, CHEF) */
+  disposeLot: (id, payload) =>
+    withResult(() => axiosInstance.put(`/lots/${id}/dispose`, payload || {})),
 
   // Shipments & logistics
   getShipments: params =>
@@ -158,20 +161,25 @@ export const workflowService = {
         }
       });
     }
-    // Content-Type: false → axios không gửi header, browser đặt multipart/form-data + boundary (bắt buộc cho upload file)
-    return withResult(() =>
-      axiosInstance.put(`/shipments/${id}/status`, formData, {
-        headers: { 'Content-Type': false },
-      })
-    );
+    return withResult(() => axiosInstance.put(`/shipments/${id}/status`, formData));
   },
   updateShipmentCODStatus: (id, payload) =>
     withResult(() => axiosInstance.put(`/shipments/${id}/cod-status`, payload)),
   confirmShipmentReceipt: (id, payload) => {
     const formData = new FormData();
-    if (payload?.receipt_status) formData.append('receipt_status', payload.receipt_status);
-    if (payload?.receipt_notes) formData.append('receipt_notes', payload.receipt_notes);
-    if (payload?.delivery_discrepancy) formData.append('delivery_discrepancy', payload.delivery_discrepancy);
+    // Bắt buộc gửi receipt_status — BE parse multipart qua multer (optionalUpload) mới có req.body
+    if (payload?.receipt_status != null && String(payload.receipt_status).trim() !== '') {
+      formData.append('receipt_status', String(payload.receipt_status).trim());
+    }
+    if (payload?.receipt_notes != null && String(payload.receipt_notes).trim() !== '') {
+      formData.append('receipt_notes', String(payload.receipt_notes));
+    }
+    if (payload?.delivery_discrepancy != null && String(payload.delivery_discrepancy).trim() !== '') {
+      formData.append('delivery_discrepancy', String(payload.delivery_discrepancy));
+    }
+    if (payload?.receipt_lines != null && Array.isArray(payload.receipt_lines)) {
+      formData.append('receipt_lines', JSON.stringify(payload.receipt_lines));
+    }
     if (Array.isArray(payload?.evidence_photos)) {
       payload.evidence_photos.forEach((file, index) => {
         if (file instanceof File) {
@@ -186,11 +194,7 @@ export const workflowService = {
         }
       });
     }
-    return withResult(() =>
-      axiosInstance.put(`/shipments/${id}/confirm-receipt`, formData, {
-        headers: { 'Content-Type': false },
-      })
-    );
+    return withResult(() => axiosInstance.put(`/shipments/${id}/confirm-receipt`, formData));
   },
   dispatchShipment: id =>
     withResult(() => axiosInstance.put(`/shipments/${id}/dispatch`)),
@@ -259,11 +263,7 @@ export const workflowService = {
     withResult(() => axiosInstance.get(`/return-requests/${id}`)),
   createReturnRequest: payload => {
     if (payload instanceof FormData) {
-      return withResult(() =>
-        axiosInstance.post('/return-requests', payload, {
-          headers: { 'Content-Type': false },
-        })
-      );
+      return withResult(() => axiosInstance.post('/return-requests', payload));
     }
     return withResult(() => axiosInstance.post('/return-requests', payload));
   },
@@ -277,6 +277,21 @@ export const workflowService = {
   // Material requests
   getMaterialRequests: params =>
     withResult(() => axiosInstance.get('/material-requests', { params })),
+  /** Giữ nguyên { data, pagination } từ BE (withResult unwrap làm mất pagination). */
+  getMaterialRequestsPaginated: async params => {
+    try {
+      const response = await axiosInstance.get('/material-requests', { params });
+      const payload = response?.data ?? {};
+      return { success: true, data: payload, message: payload.message || '' };
+    } catch (error) {
+      return {
+        success: false,
+        data: null,
+        message: error?.response?.data?.message || 'API request failed',
+        error,
+      };
+    }
+  },
   getMaterialRequest: id =>
     withResult(() => axiosInstance.get(`/material-requests/${id}`)),
   createMaterialRequest: payload =>
@@ -322,11 +337,7 @@ export const workflowService = {
       formData.append('delivery_photo', photo, name);
     }
     return withResult(() =>
-      axiosInstance.put(
-        `/delivery-routes/${routeId}/stops/${stopId}/status`,
-        formData,
-        { headers: { 'Content-Type': false } }
-      )
+      axiosInstance.put(`/delivery-routes/${routeId}/stops/${stopId}/status`, formData)
     );
   },
 

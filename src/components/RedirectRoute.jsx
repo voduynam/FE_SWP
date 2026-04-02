@@ -1,9 +1,10 @@
 import { useContext } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContext';
+import { getDefaultAppPathForUser } from '../utils/defaultAppRoute';
 
 const RedirectRoute = () => {
-  const { isAuthenticated, loading } = useContext(AuthContext);
+  const { isAuthenticated, loading, user } = useContext(AuthContext);
 
   // Show loading while checking authentication
   if (loading) {
@@ -17,12 +18,12 @@ const RedirectRoute = () => {
     );
   }
 
-  // Redirect to login if not authenticated, otherwise to dashboard
+  // Chưa đăng nhập → /login; đã đăng nhập → trang mặc định theo role
   if (!isAuthenticated) {
     return <Navigate to='/login' replace />;
   }
 
-  return <Navigate to='/app/dashboard' replace />;
+  return <Navigate to={getDefaultAppPathForUser(user)} replace />;
 };
 
 export default RedirectRoute;

@@ -336,7 +336,7 @@ export default function DriverDashboard() {
                   value={issueDescription}
                   onChange={(e) => setIssueDescription(e.target.value)}
                   placeholder="Nhập mô tả chi tiết về sự cố gặp phải..."
-                  className="input-field min-h-[120px] resize-none"
+                  className="input-field w-full min-h-[120px] resize-none"
                   rows={4}
                 />
               </div>

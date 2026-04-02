@@ -6,6 +6,19 @@ import { workflowService } from '../../services/workflowService';
 
 const ORDERS_PATH = '/app/store/orders';
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Đợi BE cập nhật COMPLETED (callback/webhook có thể chậm hơn redirect một chút). */
+async function waitPaymentCompleted(paymentId, { maxAttempts = 12, intervalMs = 600 } = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await paymentService.checkPaymentStatus(paymentId);
+    const status = res.success && res.data ? res.data.payment_status : null;
+    if (status === 'COMPLETED') return true;
+    await delay(intervalMs);
+  }
+  return false;
+}
+
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -26,7 +39,6 @@ export default function PaymentSuccessPage() {
 
     const run = async () => {
       try {
-        // 1) Lấy thông tin payment (có order_id)
         const resPayment = await paymentService.getPaymentById(paymentId);
         if (cancelled) return;
         if (!resPayment.success || !resPayment.data) {
@@ -39,35 +51,38 @@ export default function PaymentSuccessPage() {
         const payment = resPayment.data;
         const orderId = payment.order_id;
 
-        // 2) Đồng bộ trạng thái với PayOS (BE có thể cập nhật payment_status & order.payment_status)
-        const resStatus = await paymentService.checkPaymentStatus(paymentId);
+        setMessage('Đang đồng bộ trạng thái thanh toán với PayOS...');
+        const alreadyDone = payment.payment_status === 'COMPLETED';
+        const completed = alreadyDone || (await waitPaymentCompleted(paymentId));
         if (cancelled) return;
-        const paymentStatus = resStatus.success && resStatus.data ? resStatus.data.payment_status : payment.payment_status;
 
-        if (paymentStatus !== 'COMPLETED') {
-          setMessage('Thanh toán chưa được xác nhận. Chuyển về trang đặt hàng.');
+        if (!completed) {
+          setMessage(
+            'Thanh toán chưa được xác nhận (COMPLETED). Bạn có thể kiểm tra lại đơn hoặc liên hệ quản trị.'
+          );
           setStatus('done');
-          setTimeout(() => navigate(ORDERS_PATH, { replace: true }), 2500);
+          setTimeout(() => navigate(ORDERS_PATH, { replace: true }), 3500);
           return;
         }
 
-        // 3) Sau khi thanh toán thành công → chuyển đơn sang SUBMITTED (gửi về bếp trung tâm)
         setStatus('submitting');
         setMessage('Đang gửi đơn về bếp trung tâm...');
         const resUpdate = await workflowService.updateInternalOrderStatus(orderId, 'SUBMITTED');
         if (cancelled) return;
 
         if (!resUpdate.success) {
-          setMessage((resUpdate.message || 'Gửi đơn thất bại.') + ' Chuyển về trang đặt hàng.');
+          setMessage(
+            (resUpdate.message || 'Gửi đơn thất bại.') +
+              ' Thanh toán đã ghi nhận; vui lòng gửi đơn thủ công từ chi tiết đơn.'
+          );
           setStatus('done');
-          setTimeout(() => navigate(ORDERS_PATH, { replace: true }), 3000);
+          setTimeout(() => navigate(ORDERS_PATH, { replace: true }), 4000);
           return;
         }
 
         setStatus('done');
         setMessage('Thanh toán thành công. Đơn đã được gửi về bếp trung tâm.');
-        const t = setTimeout(() => navigate(ORDERS_PATH, { replace: true }), 2000);
-        return () => clearTimeout(t);
+        setTimeout(() => navigate(ORDERS_PATH, { replace: true }), 2000);
       } catch (err) {
         if (cancelled) return;
         console.error('Payment success page error:', err);
@@ -78,7 +93,9 @@ export default function PaymentSuccessPage() {
     };
 
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [paymentId, navigate]);
 
   return (

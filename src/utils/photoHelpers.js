@@ -6,7 +6,7 @@
  */
 export function resolvePhotoUrl(url) {
   if (!url) return '';
-  const u = String(url).trim();
+  const u = String(url).trim().replace(/\\/g, '/');
 
   // Blob URL (preview local) — không dùng cho "ảnh đã gửi", tránh hiển thị ảnh local
   if (u.startsWith('blob:')) return '';
@@ -21,6 +21,10 @@ export function resolvePhotoUrl(url) {
       const host = parsed.hostname || '';
       // Nếu BE trả về localhost/127.0.0.1 thì thay bằng API base đã cấu hình (để production dùng đúng domain)
       if (host === 'localhost' || host === '127.0.0.1') {
+        // Ưu tiên same-origin path để tận dụng Vite/reverse proxy (/uploads -> BE)
+        if (parsed.pathname?.startsWith('/uploads/')) {
+          return `${parsed.pathname}${parsed.search}`;
+        }
         return `${apiRoot}${parsed.pathname}${parsed.search}`;
       }
       return u;
@@ -46,5 +50,6 @@ export function resolvePhotoUrl(url) {
   const uploadsIndex = path.toLowerCase().lastIndexOf('uploads');
   if (uploadsIndex >= 0) path = path.substring(uploadsIndex);
   if (!path.startsWith('/')) path = `/${path}`;
+  if (path.startsWith('/uploads/')) return path;
   return `${apiRoot}${path}`;
 }

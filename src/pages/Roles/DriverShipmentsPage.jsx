@@ -62,6 +62,20 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function formatVnd(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '-';
+  return `${v.toLocaleString('vi-VN')} đ`;
+}
+
+function getCodEvidencePhotoUrls(shipment) {
+  const raw = shipment?.cod_evidence_photos;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((e) => (typeof e === 'string' ? e : e?.url))
+    .filter(Boolean);
+}
+
 function calculateDistanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -88,6 +102,7 @@ export default function DriverShipmentsPage() {
   const [codCollectedAmount, setCodCollectedAmount] = useState('');
   const [codCollectionNotes, setCodCollectionNotes] = useState('');
   const [codEvidenceFiles, setCodEvidenceFiles] = useState([]);
+  const [codEvidencePreviewUrls, setCodEvidencePreviewUrls] = useState([]);
   const [shipmentToRouteId, setShipmentToRouteId] = useState({});
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
   const [deliveredShipments, setDeliveredShipments] = useState([]);
@@ -119,6 +134,13 @@ export default function DriverShipmentsPage() {
     setPreviewPhotoUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [deliveryPhotoFile]);
+
+  useEffect(() => {
+    const files = codEvidenceFiles || [];
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setCodEvidencePreviewUrls(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [codEvidenceFiles]);
 
   const loadShipments = async () => {
     setLoading(true);
@@ -505,6 +527,12 @@ export default function DriverShipmentsPage() {
                 <div className='text-slate-500'>
                   Ngày giao: {sh.ship_date ? new Date(sh.ship_date).toLocaleString('vi-VN') : '-'}
                 </div>
+                {Number(sh?.cod_amount || 0) > 0 && (
+                  <div className='flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900'>
+                    <Wallet className='h-3.5 w-3.5 shrink-0' />
+                    <span>Thu hộ COD: {formatVnd(sh.cod_amount)}</span>
+                  </div>
+                )}
               </div>
               <div className='mt-4 flex gap-2'>
                 <button
@@ -547,6 +575,46 @@ export default function DriverShipmentsPage() {
             {!detailShipment && <p className='text-sm text-slate-500'>Đang tải...</p>}
             {detailShipment && (
               <div className='space-y-4'>
+                {Number(detailShipment?.cod_amount || 0) > 0 && (() => {
+                  const expected = Number(detailShipment.cod_amount || 0);
+                  const collectedAmt = Number(detailShipment.cod_collected_amount || 0);
+                  const codDone =
+                    detailShipment.status === 'DELIVERED' &&
+                    (detailShipment.cod_status === 'COLLECTED' ||
+                      detailShipment.cod_status === 'CONFIRMED' ||
+                      collectedAmt > 0);
+                  return (
+                    <div className='rounded-xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-white to-orange-50/80 p-4 shadow-sm'>
+                      <div className='flex flex-wrap items-start justify-between gap-3'>
+                        <div className='flex items-center gap-3'>
+                          <div className='flex h-11 w-11 items-center justify-center rounded-full bg-amber-100 text-amber-800'>
+                            <Wallet className='h-5 w-5' />
+                          </div>
+                          <div>
+                            <p className='text-[11px] font-semibold uppercase tracking-wide text-amber-800'>
+                              Thu hộ COD (khi giao)
+                            </p>
+                            <p className='text-xl font-bold text-amber-950 tabular-nums'>
+                              {formatVnd(expected)}
+                            </p>
+                          </div>
+                        </div>
+                        {codDone && (
+                          <span className='inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800'>
+                            <CheckCircle className='h-3.5 w-3.5' />
+                            Đã thu COD thành công
+                            {collectedAmt > 0 ? ` — ${formatVnd(collectedAmt)}` : ''}
+                          </span>
+                        )}
+                      </div>
+                      {detailShipment.status === 'IN_TRANSIT' && (
+                        <p className='mt-2 text-xs text-amber-900/80'>
+                          Vui lòng thu đúng số tiền, nhập số đã thu và chụp ảnh chứng minh bên dưới trước khi xác nhận giao hàng. Sau khi giao, quản lý sẽ đối chiếu ảnh và số tiền có khớp đơn hay không.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 {(() => {
                   const dLat = toNumber(detailShipment?.to_location_id?.coordinates?.latitude);
                   const dLng = toNumber(detailShipment?.to_location_id?.coordinates?.longitude);
@@ -644,117 +712,251 @@ export default function DriverShipmentsPage() {
 
                 <div className='border-t border-slate-200 pt-4'>
                   <h3 className='mb-3 text-sm font-semibold text-slate-700'>Cập nhật trạng thái giao hàng</h3>
-                  <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                  <div className='flex flex-col gap-4'>
                   {detailShipment.status === 'SHIPPED' && (
                     <button
                       disabled={actionLoadingId === detailShipment._id}
                       onClick={() => updateStatus(detailShipment, 'IN_TRANSIT')}
-                      className='inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
+                      className='inline-flex w-fit items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60'
                     >
                       <ArrowRight className='h-4 w-4' /> Đã xuất kho
                     </button>
                   )}
-                  {detailShipment.status === 'IN_TRANSIT' && (
-                    <>
-                      <p className='text-sm font-medium text-slate-700'>Đã tới nơi — xác nhận giao hàng (gửi ảnh)</p>
-                      <label className='flex cursor-pointer flex-1 items-center justify-between rounded-lg border border-dashed border-emerald-400 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-100'>
-                        <div className='flex flex-col text-left'>
-                          <span className='font-medium'>
-                            Ảnh giao hàng {deliveryPhotoFile ? '(đã chọn)' : ''}
-                          </span>
-                          <span className='text-[11px] text-emerald-600/80'>
-                            {deliveryPhotoFile
-                              ? deliveryPhotoFile.name
-                              : 'Nhấp để chọn file (jpg, png...)'}
-                          </span>
-                        </div>
-                        <input
-                          type='file'
-                          accept='image/*'
-                          onChange={e => setDeliveryPhotoFile(e.target.files?.[0] || null)}
-                          className='hidden'
-                        />
-                      </label>
-                      {previewPhotoUrl && (
-                        <div className='rounded-lg border border-emerald-200 bg-white p-2'>
-                          <p className='mb-1 text-xs font-medium text-emerald-700'>Preview ảnh trước khi gửi</p>
-                          <img src={previewPhotoUrl} alt='Preview giao hàng' className='max-w-[200px] rounded border border-slate-200 object-cover' />
-                        </div>
-                      )}
-                      {Number(detailShipment?.cod_amount || 0) > 0 && (
-                        <div className='w-full rounded-lg border border-amber-200 bg-amber-50 p-3'>
-                          <p className='mb-2 inline-flex items-center gap-1 text-xs font-semibold text-amber-800'>
-                            <Wallet className='h-3.5 w-3.5' /> Đơn COD: nhập số tiền đã thu
+                  {detailShipment.status === 'IN_TRANSIT' && (() => {
+                    const hasCod = Number(detailShipment?.cod_amount || 0) > 0;
+                    return (
+                      <div className={`grid gap-4 ${hasCod ? 'lg:grid-cols-2' : ''}`}>
+                        <div className='space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4'>
+                          <p className='text-sm font-semibold text-emerald-900'>Ảnh xác nhận giao hàng</p>
+                          <p className='text-xs text-slate-600'>
+                            Đã tới nơi — chọn ảnh giao; preview hiển thị ngay bên dưới.
                           </p>
-                          <div className='grid gap-2 sm:grid-cols-2'>
+                          <label className='flex cursor-pointer items-center justify-between rounded-lg border border-dashed border-emerald-400 bg-white px-3 py-2.5 text-xs text-emerald-800 hover:bg-emerald-50/80'>
+                            <div className='flex min-w-0 flex-col text-left'>
+                              <span className='font-medium'>
+                                {deliveryPhotoFile ? 'Đã chọn ảnh' : 'Chọn ảnh giao hàng'}
+                              </span>
+                              <span className='truncate text-[11px] text-emerald-700/80'>
+                                {deliveryPhotoFile?.name || 'JPG, PNG...'}
+                              </span>
+                            </div>
+                            <input
+                              type='file'
+                              accept='image/*'
+                              onChange={e => setDeliveryPhotoFile(e.target.files?.[0] || null)}
+                              className='hidden'
+                            />
+                          </label>
+                          {previewPhotoUrl && (
+                            <div className='overflow-hidden rounded-lg border border-emerald-200 bg-white p-2 shadow-inner'>
+                              <p className='mb-2 text-xs font-medium text-emerald-800'>Xem trước ngay</p>
+                              <img
+                                src={previewPhotoUrl}
+                                alt='Preview giao hàng'
+                                className='max-h-60 w-full rounded-md object-contain'
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {hasCod && (
+                          <div className='space-y-3 rounded-xl border border-amber-200 bg-amber-50/50 p-4'>
+                            <p className='text-sm font-semibold text-amber-900'>Thu hộ COD</p>
+                            <p className='text-[11px] leading-relaxed text-amber-800/90'>
+                              Quản lý sẽ xác nhận sau khi bạn giao xong (đối chiếu số tiền và ảnh chứng minh).
+                            </p>
+                            <p className='text-xs text-amber-900'>
+                              Số tiền cần thu:{' '}
+                              <span className='text-base font-bold tabular-nums text-amber-950'>
+                                {formatVnd(detailShipment.cod_amount)}
+                              </span>
+                            </p>
                             <input
                               type='number'
                               min='0'
                               step='1000'
-                              placeholder={`Số tiền đã thu (dự kiến ${Number(detailShipment.cod_amount || 0).toLocaleString('vi-VN')} đ)`}
+                              placeholder='Nhập số tiền đã thu'
                               value={codCollectedAmount}
                               onChange={e => setCodCollectedAmount(e.target.value)}
-                              className='rounded border border-amber-200 bg-white px-2 py-1.5 text-sm'
+                              className='w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm'
                             />
-                            <input
-                              type='file'
-                              multiple
-                              accept='image/*,video/*'
-                              onChange={e => setCodEvidenceFiles(Array.from(e.target.files || []).slice(0, 3))}
-                              className='rounded border border-amber-200 bg-white px-2 py-1.5 text-xs'
+                            <label className='flex cursor-pointer flex-col gap-1 rounded-lg border border-dashed border-amber-400 bg-white px-3 py-2.5 text-xs text-amber-900 hover:bg-amber-50/80'>
+                              <span className='font-medium'>Ảnh / video chứng minh thu tiền (tối đa 3)</span>
+                              <span className='text-[11px] text-amber-800/80'>Chọn xong là hiện preview ngay</span>
+                              <input
+                                type='file'
+                                multiple
+                                accept='image/*,video/*'
+                                onChange={e =>
+                                  setCodEvidenceFiles(Array.from(e.target.files || []).slice(0, 3))
+                                }
+                                className='mt-1 text-[11px] file:mr-2 file:rounded file:border-0 file:bg-amber-100 file:px-2 file:py-1 file:text-amber-900'
+                              />
+                            </label>
+                            {codEvidencePreviewUrls.length > 0 && (
+                              <div>
+                                <p className='mb-2 text-xs font-medium text-amber-900'>Xem trước chứng minh COD</p>
+                                <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+                                  {codEvidenceFiles.map((file, i) => {
+                                    const url = codEvidencePreviewUrls[i];
+                                    if (!url) return null;
+                                    const isVideo = file?.type?.startsWith('video');
+                                    return (
+                                      <a
+                                        key={`${url}-${i}`}
+                                        href={url}
+                                        target='_blank'
+                                        rel='noopener noreferrer'
+                                        className='block overflow-hidden rounded-lg border border-amber-200 bg-white'
+                                      >
+                                        {isVideo ? (
+                                          <video
+                                            src={url}
+                                            className='h-28 w-full object-cover'
+                                            muted
+                                            playsInline
+                                            preload='metadata'
+                                          />
+                                        ) : (
+                                          <img
+                                            src={url}
+                                            alt={`COD ${i + 1}`}
+                                            className='h-28 w-full object-cover'
+                                          />
+                                        )}
+                                      </a>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                            <textarea
+                              rows={2}
+                              placeholder='Ghi chú thu tiền COD (nếu có)'
+                              value={codCollectionNotes}
+                              onChange={e => setCodCollectionNotes(e.target.value)}
+                              className='w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs'
                             />
                           </div>
-                          <textarea
-                            rows={2}
-                            placeholder='Ghi chú thu tiền COD (nếu có)'
-                            value={codCollectionNotes}
-                            onChange={e => setCodCollectionNotes(e.target.value)}
-                            className='mt-2 w-full rounded border border-amber-200 bg-white px-2 py-1.5 text-xs'
-                          />
+                        )}
+
+                        <div
+                          className={
+                            hasCod
+                              ? 'flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4 lg:col-span-2'
+                              : 'flex flex-wrap justify-end gap-2 pt-1'
+                          }
+                        >
+                          <button
+                            disabled={actionLoadingId === detailShipment._id || !deliveryPhotoFile}
+                            onClick={() => updateStatus(detailShipment, 'DELIVERED')}
+                            className='inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60'
+                          >
+                            <CheckCircle className='h-4 w-4' /> Xác nhận giao hàng
+                          </button>
                         </div>
-                      )}
-                      <button
-                        disabled={actionLoadingId === detailShipment._id || !deliveryPhotoFile}
-                        onClick={() => updateStatus(detailShipment, 'DELIVERED')}
-                        className='inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60'
-                      >
-                        <CheckCircle className='h-4 w-4' /> Xác nhận giao hàng
-                      </button>
-                    </>
-                  )}
+                      </div>
+                    );
+                  })()}
                   {!['PICKED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERED'].includes(detailShipment.status) && (
                     <p className='text-sm text-slate-600'>
                       Lô ở trạng thái <strong>{SHIPMENT_STATUS[detailShipment.status] || detailShipment.status}</strong>. Không có thao tác cập nhật cho trạng thái này.
                     </p>
                   )}
-                  {detailShipment.status === 'DELIVERED' && (
-                    <div className='space-y-2'>
-                      <p className='text-sm font-medium text-emerald-600'>✓ Đã giao thành công</p>
-                      {(() => {
-                        const photoUrl = resolvePhotoUrl(detailShipment.delivery_photo_url);
-                        if (!photoUrl) return null;
-                        return (
-                          <div className='rounded-lg border border-slate-200 bg-white p-2'>
-                            <p className='mb-1 text-xs font-medium text-slate-600'>Ảnh đã gửi</p>
-                            <img
-                              src={photoUrl}
-                              alt='Ảnh giao hàng'
-                              className='max-w-[280px] rounded border border-slate-200 object-cover'
-                              onError={e => { e.target.style.display = 'none'; }}
-                            />
-                            <a
-                              href={photoUrl}
-                              target='_blank'
-                              rel='noopener noreferrer'
-                              className='mt-1 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-800'
-                            >
-                              Xem ảnh
-                            </a>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
+                  {detailShipment.status === 'DELIVERED' && (() => {
+                    const deliveryUrl = resolvePhotoUrl(detailShipment.delivery_photo_url);
+                    const evidenceUrls = getCodEvidencePhotoUrls(detailShipment).map((u) =>
+                      resolvePhotoUrl(u),
+                    );
+                    const hasCod = Number(detailShipment?.cod_amount || 0) > 0;
+                    const collectedAmt = Number(detailShipment.cod_collected_amount || 0);
+                    const codDone =
+                      hasCod &&
+                      (detailShipment.cod_status === 'COLLECTED' ||
+                        detailShipment.cod_status === 'CONFIRMED' ||
+                        collectedAmt > 0);
+                    return (
+                      <div className='space-y-4'>
+                        <p className='inline-flex items-center gap-2 text-sm font-semibold text-emerald-700'>
+                          <CheckCircle className='h-4 w-4' /> Đã giao thành công
+                        </p>
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          {deliveryUrl && (
+                            <div className='rounded-xl border border-slate-200 bg-slate-50/50 p-3'>
+                              <p className='mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600'>
+                                Ảnh giao hàng
+                              </p>
+                              <img
+                                src={deliveryUrl}
+                                alt='Ảnh giao hàng'
+                                className='max-h-64 w-full rounded-lg border border-slate-200 object-contain bg-white'
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                }}
+                              />
+                              <a
+                                href={deliveryUrl}
+                                target='_blank'
+                                rel='noopener noreferrer'
+                                className='mt-2 inline-block text-xs font-medium text-indigo-600 hover:text-indigo-800'
+                              >
+                                Mở ảnh giao hàng
+                              </a>
+                            </div>
+                          )}
+                          {hasCod && (
+                            <div className='rounded-xl border border-amber-200 bg-amber-50/40 p-3'>
+                              <p className='mb-2 text-xs font-semibold uppercase tracking-wide text-amber-900'>
+                                Thu hộ COD
+                              </p>
+                              {codDone ? (
+                                <p className='mb-2 text-sm font-medium text-emerald-800'>
+                                  Đã thu COD thành công
+                                  {collectedAmt > 0 ? ` — ${formatVnd(collectedAmt)}` : ''}
+                                </p>
+                              ) : (
+                                <p className='mb-2 text-xs text-amber-900'>
+                                  Dự kiến thu: {formatVnd(detailShipment.cod_amount)}
+                                </p>
+                              )}
+                              {detailShipment.cod_collection_notes && (
+                                <p className='mb-2 text-xs text-slate-600'>
+                                  Ghi chú: {detailShipment.cod_collection_notes}
+                                </p>
+                              )}
+                              {evidenceUrls.length > 0 && (
+                                <div>
+                                  <p className='mb-2 text-xs font-medium text-amber-900'>
+                                    Ảnh chứng minh thu tiền
+                                  </p>
+                                  <div className='grid grid-cols-2 gap-2'>
+                                    {evidenceUrls.map((u, i) => (
+                                      <a
+                                        key={`${u}-${i}`}
+                                        href={u}
+                                        target='_blank'
+                                        rel='noopener noreferrer'
+                                        className='block overflow-hidden rounded-lg border border-amber-200 bg-white'
+                                      >
+                                        <img
+                                          src={u}
+                                          alt={`Chứng minh ${i + 1}`}
+                                          className='h-24 w-full object-cover'
+                                          onError={(e) => {
+                                            e.target.style.display = 'none';
+                                          }}
+                                        />
+                                      </a>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   </div>
                 </div>
               </div>

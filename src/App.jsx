@@ -14,6 +14,7 @@ import store from './store';
 import ScrollToTop from './components/ScrollToTop';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
 import RedirectRoute from './components/RedirectRoute';
+import AppHomeRedirect from './components/AppHomeRedirect';
 import Layout from './components/Layout/Layout';
 import CkManagerLayout from './components/Layout/CkManagerLayout';
 import Login from './pages/Auth/Login';
@@ -26,11 +27,13 @@ const ManagerProductsPage = lazy(() => import('./pages/Roles/ManagerProductsPage
 const ManagerInventoryPage = lazy(() => import('./pages/Roles/ManagerInventoryPage'));
 const ManagerReportsPage = lazy(() => import('./pages/Roles/ManagerReportsPage'));
 const ManagerReturnRequestPage = lazy(() => import('./pages/Roles/ManagerReturnRequestPage'));
+const ManagerKitchenOpsPage = lazy(() => import('./pages/Roles/ManagerKitchenOpsPage'));
 const RecipesPage = lazy(() => import('./pages/Roles/RecipesPage'));
 const FranchiseOrdersPage = lazy(() => import('./pages/Roles/FranchiseOrdersPage'));
 const FranchiseInventoryPage = lazy(() => import('./pages/Roles/FranchiseInventoryPage'));
 const GoodsReceiptPage = lazy(() => import('./pages/Roles/GoodsReceiptPage'));
 const StoreReturnRequestPage = lazy(() => import('./pages/Roles/StoreReturnRequestPage'));
+const StoreLocationPage = lazy(() => import('./pages/Roles/StoreLocationPage'));
 const CentralOrdersPage = lazy(() => import('./pages/Roles/CentralOrdersPage'));
 const CentralProductionPage = lazy(() => import('./pages/Roles/CentralProductionPage'));
 const CentralShipmentsPage = lazy(() => import('./pages/Roles/CentralShipmentsPage'));
@@ -80,7 +83,7 @@ function AppContent() {
           </RoleProtectedRoute>
         }
       >
-        <Route index element={<RoleDashboard />} />
+        <Route index element={<AppHomeRedirect />} />
         <Route path='dashboard' element={<RoleDashboard />} />
 
         {/* Admin routes */}
@@ -100,6 +103,7 @@ function AppContent() {
           <Route path='inventory' element={<ManagerInventoryPage />} />
           <Route path='shipments' element={<CentralShipmentsPage />} />
           <Route path='returns' element={<ManagerReturnRequestPage />} />
+          <Route path='kitchen-ops' element={<ManagerKitchenOpsPage />} />
           <Route path='reports' element={<ManagerReportsPage />} />
         </Route>
 
@@ -129,6 +133,7 @@ function AppContent() {
           <Route path='receiving' element={<GoodsReceiptPage />} />
           <Route path='returns' element={<StoreReturnRequestPage />} />
           <Route path='inventory' element={<FranchiseInventoryPage />} />
+          <Route path='location' element={<StoreLocationPage />} />
         </Route>
 
         {/* Driver routes */}

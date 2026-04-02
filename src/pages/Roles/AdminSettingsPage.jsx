@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PlusCircle, RefreshCcw, X } from 'lucide-react';
+import ModalPortal from '../../components/ui/ModalPortal';
 import { workflowService } from '../../services/workflowService';
 
 const getRows = data => {
@@ -120,8 +121,9 @@ export default function AdminSettingsPage() {
           </div>
 
           {showCreateUom && (
+            <ModalPortal>
             <div
-              className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+              className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
               onClick={() => setShowCreateUom(false)}
             >
               <div
@@ -198,6 +200,7 @@ export default function AdminSettingsPage() {
             </form>
               </div>
             </div>
+            </ModalPortal>
           )}
 
           <div className='rounded-xl border border-slate-200 bg-white'>
@@ -258,8 +261,9 @@ export default function AdminSettingsPage() {
           </div>
 
           {showCreateCategory && (
+            <ModalPortal>
             <div
-              className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4'
+              className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
               onClick={() => setShowCreateCategory(false)}
             >
               <div
@@ -335,6 +339,7 @@ export default function AdminSettingsPage() {
               </form>
               </div>
             </div>
+            </ModalPortal>
           )}
 
           <div className='rounded-xl border border-slate-200 bg-white'>

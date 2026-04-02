@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ClipboardList, Package, RefreshCcw, TruckIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, Bell, ClipboardList, Package, RefreshCcw, TruckIcon } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ComposedChart, Line } from 'recharts';
 import { ChartContainer, ChartTooltipContent } from '../../components/ui/chart';
 import StatCard from '../../components/ui/StatCard';
@@ -41,6 +42,17 @@ const getGreeting = () => {
   return 'Chào buổi tối';
 };
 
+/** Đồng bộ logic với CentralShipmentsPage — COD đã giao, chờ quản lý xác nhận */
+function countShipmentsPendingCodConfirm(list) {
+  if (!Array.isArray(list)) return 0;
+  return list.filter(sh => {
+    if (!sh || sh.status !== 'DELIVERED') return false;
+    if (Number(sh.cod_amount || 0) <= 0) return false;
+    if (Number(sh.cod_collected_amount || 0) <= 0) return false;
+    return String(sh.cod_status || '').toUpperCase() === 'COLLECTED';
+  }).length;
+}
+
 export default function ManagerDashboard() {
   const { user } = useAuth();
   const userName = user?.name || user?.full_name || 'Quản lý';
@@ -55,18 +67,20 @@ export default function ManagerDashboard() {
   const [paymentView, setPaymentView] = useState('day'); // day | month | year
   const [profitStats, setProfitStats] = useState(null);
   const [profitView, setProfitView] = useState('day'); // day | week | month
+  const [pendingCodShipmentCount, setPendingCodShipmentCount] = useState(0);
 
   const loadData = async () => {
     setLoading(true);
     setError('');
 
-    const [overviewRes, alertRes, ordersDashRes, invDashRes, shipDashRes, profitRes] = await Promise.all([
+    const [overviewRes, alertRes, ordersDashRes, invDashRes, shipDashRes, profitRes, codPendingRes] = await Promise.all([
       workflowService.getDashboardOverview({}),
       workflowService.getAlertsSummary({}),
       workflowService.getDashboardOrders({}),
       workflowService.getDashboardInventory({}),
       workflowService.getDashboardShipments({}),
       workflowService.getDashboardProfit({ group_by: profitView }),
+      workflowService.getShipmentsPaginated({ status: 'DELIVERED', page: 1, limit: 500 }),
     ]);
 
     const failedSources = [];
@@ -86,6 +100,13 @@ export default function ManagerDashboard() {
     if (invDashRes.success) setInventoryStats(invDashRes.data);
     if (shipDashRes.success) setShipmentStats(shipDashRes.data);
     if (profitRes.success) setProfitStats(profitRes.data);
+
+    if (codPendingRes.success) {
+      const codList = Array.isArray(codPendingRes.data?.data) ? codPendingRes.data.data : [];
+      setPendingCodShipmentCount(countShipmentsPendingCodConfirm(codList));
+    } else {
+      setPendingCodShipmentCount(0);
+    }
 
     setLoading(false);
   };
@@ -259,6 +280,26 @@ export default function ManagerDashboard() {
       </div>
 
       {error && <p className='text-sm text-red-600'>{error}</p>}
+
+      {pendingCodShipmentCount > 0 && (
+        <div className='flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between'>
+          <div className='flex items-start gap-3'>
+            <Bell className='mt-0.5 h-5 w-5 shrink-0 text-amber-600' aria-hidden />
+            <div>
+              <p className='font-semibold'>Có việc cần xác nhận sau khi giao</p>
+              <p className='mt-0.5 text-xs leading-relaxed text-amber-900/90'>
+                <strong>{pendingCodShipmentCount}</strong> phiếu giao đã hoàn thành (COD) đang chờ bạn đối chiếu và xác nhận số tiền mặt tài xế đã thu.
+              </p>
+            </div>
+          </div>
+          <Link
+            to='/app/manager/shipments'
+            className='shrink-0 rounded-lg border border-amber-400 bg-white px-3 py-2 text-center text-xs font-medium text-amber-900 hover:bg-amber-100/80'
+          >
+            Mở phiếu giao hàng
+          </Link>
+        </div>
+      )}
 
       <div className='grid gap-4 md:grid-cols-4'>
         <StatCard

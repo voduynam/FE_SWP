@@ -16,6 +16,8 @@ import {
   X,
   ChevronDown,
   RotateCcw,
+  Boxes,
+  MapPin,
 } from "lucide-react";
 import BrandLogo from "../BrandLogo";
 
@@ -177,6 +179,11 @@ const menuByRole = {
       path: "/app/manager/inventory",
     },
     {
+      title: "Yêu cầu NL & bù SX",
+      icon: Boxes,
+      path: "/app/manager/kitchen-ops",
+    },
+    {
       title: "Lịch sử giao hàng",
       icon: TruckIcon,
       path: "/app/manager/shipments",
@@ -210,12 +217,12 @@ const menuByRole = {
       icon: TruckIcon,
       path: "/app/central/production",
     },
-    {
-      title: "Yêu cầu trả hàng",
-      icon: RotateCcw,
-      // Dùng chung màn với Manager để duyệt/ xử lý trả hàng
-      path: "/app/manager/returns",
-    },
+    // Ẩn menu: Yêu cầu trả hàng (NV Bếp trung tâm)
+    // {
+    //   title: "Yêu cầu trả hàng",
+    //   icon: RotateCcw,
+    //   path: "/app/manager/returns",
+    // },
     {
       title: "Phiếu giao hàng",
       icon: TruckIcon,
@@ -235,21 +242,23 @@ const menuByRole = {
 
   // Supply Coordinator – điều phối cung ứng
   supply_coordinator: [
-    {
-      title: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/app/supply/dashboard",
-    },
+    // Ẩn menu: Dashboard
+    // {
+    //   title: "Dashboard",
+    //   icon: LayoutDashboard,
+    //   path: "/app/supply/dashboard",
+    // },
     {
       title: "Phiếu giao hàng",
       icon: TruckIcon,
       path: "/app/central/shipments",
     },
-    {
-      title: "Tổng hợp đơn",
-      icon: ClipboardList,
-      path: "/app/supply/orders",
-    },
+    // Ẩn menu: Tổng hợp đơn
+    // {
+    //   title: "Tổng hợp đơn",
+    //   icon: ClipboardList,
+    //   path: "/app/supply/orders",
+    // },
     {
       title: "Đơn hàng nội bộ",
       icon: ClipboardList,
@@ -260,25 +269,28 @@ const menuByRole = {
       icon: TruckIcon,
       path: "/app/supply/delivery",
     },
-    {
-      title: "Lịch sử giao hàng",
-      icon: TruckIcon,
-      path: "/app/supply/shipments",
-    },
-    {
-      title: "Xử lý sự cố",
-      icon: Settings,
-      path: "/app/supply/issues",
-    },
+    // Ẩn menu: Lịch sử giao hàng
+    // {
+    //   title: "Lịch sử giao hàng",
+    //   icon: TruckIcon,
+    //   path: "/app/supply/shipments",
+    // },
+    // Ẩn menu: Xử lý sự cố
+    // {
+    //   title: "Xử lý sự cố",
+    //   icon: Settings,
+    //   path: "/app/supply/issues",
+    // },
   ],
 
   // Franchise Store Staff – cửa hàng
   franchise_staff: [
-    {
-      title: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/app/store/dashboard",
-    },
+    // Ẩn menu: Dashboard (NV Cửa hàng)
+    // {
+    //   title: "Dashboard",
+    //   icon: LayoutDashboard,
+    //   path: "/app/store/dashboard",
+    // },
     {
       title: "Đơn hàng cửa hàng",
       icon: ClipboardList,
@@ -299,25 +311,32 @@ const menuByRole = {
       icon: Warehouse,
       path: "/app/store/inventory",
     },
+    {
+      title: "Vị trí cửa hàng",
+      icon: MapPin,
+      path: "/app/store/location",
+    },
   ],
 
   // Driver – tài xế
   driver: [
-    {
-      title: "Dashboard",
-      icon: LayoutDashboard,
-      path: "/app/driver/dashboard",
-    },
+    // Ẩn menu: Dashboard
+    // {
+    //   title: "Dashboard",
+    //   icon: LayoutDashboard,
+    //   path: "/app/driver/dashboard",
+    // },
     {
       title: "Lô giao hàng",
       icon: Package,
       path: "/app/driver/shipments",
     },
-    {
-      title: "Vận chuyển",
-      icon: TruckIcon,
-      path: "/app/driver/delivery",
-    },
+    // Ẩn menu: Vận chuyển
+    // {
+    //   title: "Vận chuyển",
+    //   icon: TruckIcon,
+    //   path: "/app/driver/delivery",
+    // },
   ],
 };
 

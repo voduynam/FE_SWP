@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Check, RefreshCcw, Search, X } from 'lucide-react';
 import axiosInstance from '../../utils/axiosInstance';
 import { workflowService } from '../../services/workflowService';
+import { useAuth } from '../../contexts/AuthContext';
 
 const statusLabels = {
   DRAFT: 'Nháp',
@@ -39,6 +40,13 @@ const getStatusClasses = status => {
 };
 
 export default function CentralOrdersPage() {
+  const { user } = useAuth();
+  const roleCodes = Array.isArray(user?.roles)
+    ? user.roles.map(r => String(r.code || '').toUpperCase())
+    : [];
+  /** Chỉ Supply Coordinator tạo phiếu giao (đồng bộ với CentralShipmentsPage); Manager không có quyền này */
+  const canCreateShipment = roleCodes.includes('SUPPLY_COORDINATOR');
+
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -420,7 +428,9 @@ export default function CentralOrdersPage() {
                   >
                     Chi tiết
                   </button>
-                  {(order.status === 'APPROVED' || order.status === 'PROCESSING') && !orderIdsWithShipment.has(String(order._id)) && (
+                  {canCreateShipment &&
+                    (order.status === 'APPROVED' || order.status === 'PROCESSING') &&
+                    !orderIdsWithShipment.has(String(order._id)) && (
                     <Link
                       to={`/app/central/shipments?create=1&orderId=${order._id}`}
                       className='ml-1 rounded-md border border-orange-200 px-2 py-1 text-xs text-orange-600 hover:bg-orange-50'
@@ -502,7 +512,6 @@ export default function CentralOrdersPage() {
                       <tr>
                         <th className='px-3 py-2'>Sản phẩm</th>
                         <th className='px-3 py-2'>SL đặt</th>
-                        <th className='px-3 py-2'>Đã giao</th>
                         <th className='px-3 py-2'>Đã nhận</th>
                         <th className='px-3 py-2'>Thành tiền</th>
                       </tr>
@@ -512,7 +521,6 @@ export default function CentralOrdersPage() {
                         <tr key={line._id || idx}>
                           <td className='px-3 py-2'>{getItemName(line)}</td>
                           <td className='px-3 py-2'>{line.qty_ordered ?? 0}</td>
-                          <td className='px-3 py-2'>{line.fulfillment?.qty_shipped_total ?? 0}</td>
                           <td className='px-3 py-2'>{line.fulfillment?.qty_received_total ?? 0}</td>
                           <td className='px-3 py-2'>{line.line_total != null ? Number(line.line_total).toLocaleString('vi-VN') : '-'}</td>
                         </tr>
@@ -520,7 +528,9 @@ export default function CentralOrdersPage() {
                     </tbody>
                   </table>
                 </div>
-                {(detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') && !orderIdsWithShipment.has(String(detailOrder._id)) && (
+                {canCreateShipment &&
+                  (detailOrder.status === 'APPROVED' || detailOrder.status === 'PROCESSING') &&
+                  !orderIdsWithShipment.has(String(detailOrder._id)) && (
                   <div className='flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4'>
                     <Link
                       to={`/app/central/shipments?create=1&orderId=${detailOrder._id}`}

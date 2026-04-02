@@ -217,7 +217,7 @@ export default function SupplyCoordinatorDashboard() {
             type="date"
             value={deliveryDate}
             onChange={e => setDeliveryDate(e.target.value)}
-            className="input-field"
+            className="input-field w-full"
             disabled={loading}
           />
           <button

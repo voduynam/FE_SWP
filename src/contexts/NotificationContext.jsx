@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { authService } from '../services/authService';
 import { notificationService } from '../services/notificationService';
+import { getDefaultAppPathForUser } from '../utils/defaultAppRoute';
 
 const NotificationContext = createContext(null);
 
@@ -159,7 +160,7 @@ export const NotificationProvider = ({ children }) => {
     if (!notification) return;
     const refType = String(notification.ref_type || '').toUpperCase();
 
-    let path = '/app/dashboard';
+    let path = getDefaultAppPathForUser(user);
 
     switch (refType) {
       case 'ORDER':
@@ -169,7 +170,7 @@ export const NotificationProvider = ({ children }) => {
         break;
       case 'SHIPMENT':
         path = feRoleCodes.includes('DRIVER')
-          ? '/app/driver/delivery'
+          ? '/app/driver/shipments'
           : '/app/central/shipments';
         break;
       case 'PRODUCTION':

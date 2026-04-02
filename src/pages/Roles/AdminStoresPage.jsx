@@ -19,6 +19,7 @@ import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import 'leaflet/dist/leaflet.css';
 import StatusBadge from '../../components/ui/StatusBadges';
+import ModalPortal from '../../components/ui/ModalPortal';
 import { workflowService } from '../../services/workflowService';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -699,7 +700,7 @@ export default function AdminStoresPage() {
                 placeholder='Tìm kiếm cửa hàng...'
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className='input-field pl-11'
+                className='input-field w-full pl-11'
               />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className='input-field min-w-[170px]'>
@@ -832,7 +833,7 @@ export default function AdminStoresPage() {
                 placeholder='Tìm vị trí kho (tên, mã, đơn vị)...'
                 value={locSearch}
                 onChange={e => setLocSearch(e.target.value)}
-                className='input-field pl-11'
+                className='input-field w-full pl-11'
               />
             </div>
             {locationMapPoints.length > 0 && (
@@ -937,6 +938,7 @@ export default function AdminStoresPage() {
       )}
 
       {aggregateMapModal && (
+        <ModalPortal>
         <div
           className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/45 px-4'
           onClick={() => setAggregateMapModal(null)}
@@ -975,12 +977,14 @@ export default function AdminStoresPage() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {selectedMapOrgUnit && (() => {
         const coords = getOrgUnitCoordinates(selectedMapOrgUnit);
         const query = coords ? `${coords.latitude},${coords.longitude}` : '';
         return (
+          <ModalPortal>
           <div
             className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/45 px-4'
             onClick={() => setSelectedMapOrgUnit(null)}
@@ -1047,6 +1051,7 @@ export default function AdminStoresPage() {
               )}
             </div>
           </div>
+          </ModalPortal>
         );
       })()}
 
@@ -1054,6 +1059,7 @@ export default function AdminStoresPage() {
         const coords = getOrgUnitCoordinates(detailOrgUnit);
         const query = coords ? `${coords.latitude},${coords.longitude}` : '';
         return (
+          <ModalPortal>
           <div
             className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/45 px-4'
             onClick={() => setDetailOrgUnit(null)}
@@ -1134,10 +1140,12 @@ export default function AdminStoresPage() {
               )}
             </div>
           </div>
+          </ModalPortal>
         );
       })()}
 
       {coordEditorOpen && coordTargetOrg && (
+        <ModalPortal>
         <div
           className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => !coordSaving && setCoordEditorOpen(false)}
@@ -1260,9 +1268,11 @@ export default function AdminStoresPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showEditOrg && (
+        <ModalPortal>
         <div
           className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => { setShowEditOrg(false); setEditingOrgId(null); }}
@@ -1489,9 +1499,11 @@ export default function AdminStoresPage() {
             )}
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showCreateOrg && (
+        <ModalPortal>
         <div
           className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={closeCreateOrgModal}
@@ -1727,9 +1739,11 @@ export default function AdminStoresPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showCreateLocation && (
+        <ModalPortal>
         <div
           className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => setShowCreateLocation(false)}
@@ -1823,9 +1837,11 @@ export default function AdminStoresPage() {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {showDeleteOrg && deleteTargetOrg && (
+        <ModalPortal>
         <div
           className='fixed inset-0 z-[2000] flex items-center justify-center bg-slate-900/40 px-4'
           onClick={() => { setShowDeleteOrg(false); setDeleteTargetOrg(null); }}
@@ -1861,6 +1877,7 @@ export default function AdminStoresPage() {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );
