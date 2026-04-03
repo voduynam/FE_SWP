@@ -86,6 +86,20 @@ const getLotCode = row => {
   return row;
 };
 
+/** Giá vốn nhập kho theo danh mục (BE: item.cost_price, qua GET /inventory/balances) */
+const formatVnd = n => {
+  if (n == null || !Number.isFinite(Number(n))) return '—';
+  return `${Number(n).toLocaleString('vi-VN')} ₫`;
+};
+
+const getItemUnitCost = item => {
+  if (!item || typeof item !== 'object') return null;
+  const v = item.cost_price;
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 export default function ManagerInventoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
@@ -509,7 +523,7 @@ export default function ManagerInventoryPage() {
   }, [groupedBalances, balSearch]);
 
   const showLocationColumn = locationFilter === 'ALL';
-  const balanceTableColSpan = showLocationColumn ? 7 : 6;
+  const balanceTableColSpan = showLocationColumn ? 9 : 8;
 
   const groupPages = Math.max(1, Math.ceil(filteredGroups.length / PAGE_SIZE));
   const currentGroupPage = Math.min(balPag.page, groupPages);
@@ -836,6 +850,12 @@ export default function ManagerInventoryPage() {
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Tồn kho</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Đặt trước</th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right'>Khả dụng</th>
+                  <th className='px-4 py-3 font-medium text-slate-600 text-right whitespace-nowrap' title='Theo giá vốn (cost_price) trên danh mục sản phẩm'>
+                    Đơn giá nhập
+                  </th>
+                  <th className='px-4 py-3 font-medium text-slate-600 text-right whitespace-nowrap' title='Đơn giá × tồn kho'>
+                    Giá trị tồn
+                  </th>
                   <th className='px-4 py-3 font-medium text-slate-600 text-right w-24'>Thao tác</th>
                 </tr>
               </thead>
@@ -863,6 +883,9 @@ export default function ManagerInventoryPage() {
                     const expanded = !!expandedGroupKeys[g.key];
 
                     const lotsCount = g.lots.length;
+                    const unitCost = getItemUnitCost(g.item_id);
+                    const lineValue =
+                      unitCost != null ? unitCost * qty : null;
                     const severityOrder = { EXPIRED: 0, CRITICAL: 1, HIGH: 2, MEDIUM: 3 };
                     const worstStatus = g.lots
                       .map(l => getLotExpiryStatus(l))
@@ -906,6 +929,12 @@ export default function ManagerInventoryPage() {
                           <td className='px-4 py-3 text-right text-slate-500'>{reserved}</td>
                           <td className={`px-4 py-3 text-right font-semibold ${avail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                             {avail}
+                          </td>
+                          <td className='px-4 py-3 text-right text-slate-700 tabular-nums'>
+                            {formatVnd(unitCost)}
+                          </td>
+                          <td className='px-4 py-3 text-right font-medium text-slate-800 tabular-nums'>
+                            {lineValue != null ? formatVnd(lineValue) : '—'}
                           </td>
                           <td className='px-4 py-3 text-right'>
                             {canAdjust && (
@@ -957,6 +986,8 @@ export default function ManagerInventoryPage() {
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Tồn</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Đặt trước</th>
                                         <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Khả dụng</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Đơn giá</th>
+                                        <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right'>Giá trị lô</th>
                                         {canAdjust && <th className='px-2 py-2 text-xs font-medium text-slate-600 text-right w-28'>Thao tác</th>}
                                       </tr>
                                     </thead>
@@ -968,6 +999,8 @@ export default function ManagerInventoryPage() {
                                         const lotAvail = getQtyAvailable(l);
                                         const lotNegative = lotQty < 0;
                                         const status = getLotExpiryStatus(l);
+                                        const lotLineVal =
+                                          unitCost != null ? unitCost * lotQty : null;
                                         return (
                                           <tr key={lotId || `${g.key}_${i}`} className='hover:bg-slate-50/50'>
                                             <td className='px-2 py-2 text-xs text-slate-900'>
@@ -1002,6 +1035,12 @@ export default function ManagerInventoryPage() {
                                             <td className='px-2 py-2 text-right text-xs text-slate-600'>{lotReserved}</td>
                                             <td className={`px-2 py-2 text-right text-xs font-semibold ${lotAvail < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                                               {lotAvail}
+                                            </td>
+                                            <td className='px-2 py-2 text-right text-xs text-slate-600 tabular-nums'>
+                                              {formatVnd(unitCost)}
+                                            </td>
+                                            <td className='px-2 py-2 text-right text-xs font-medium text-slate-800 tabular-nums'>
+                                              {lotLineVal != null ? formatVnd(lotLineVal) : '—'}
                                             </td>
                                             {canAdjust && (
                                               <td className='px-2 py-2 text-right'>
