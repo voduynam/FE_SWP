@@ -285,7 +285,7 @@ export default function FranchiseOrdersPage() {
     setExistingOrderForPayment(null);
     setPendingOrderBody(body);
     setPendingOrderTotal(estimatedTotal);
-    setNewOrder(prev => ({ ...prev, payment_type: 'COD' }));
+    // Giữ đúng hình thức đã chọn ở bước 1 (COD / Chuyển khoản) — không ép về COD (bug cũ khiến đơn ONLINE bị xử lý như COD)
     setCreateOpen(false);
     setConfirmOpen(true);
   };
@@ -366,7 +366,9 @@ export default function FranchiseOrdersPage() {
     setCreating(true);
     setCreateError('');
     try {
-      const createRes = await workflowService.createInternalOrder(pendingOrderBody);
+      const paymentMethodFromUi = newOrder.payment_type === 'COD' ? 'COD' : 'ONLINE';
+      const mergedBody = { ...pendingOrderBody, payment_method: paymentMethodFromUi };
+      const createRes = await workflowService.createInternalOrder(mergedBody);
       if (!createRes.success) {
         setCreateError(createRes.message || 'Tạo đơn thất bại');
         setCreating(false);
@@ -382,7 +384,7 @@ export default function FranchiseOrdersPage() {
       const orderNo = createdOrder?.order_no || orderId;
       const orderAmount = createdOrder?.total_amount;
 
-      const paymentType = newOrder.payment_type || 'COD';
+      const paymentType = newOrder.payment_type === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'COD';
       if (paymentType === 'BANK_TRANSFER') {
         await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
       } else {
@@ -1196,7 +1198,8 @@ export default function FranchiseOrdersPage() {
                           const orderId = existingOrderForPayment._id;
                           const orderNo = existingOrderForPayment.order_no || orderId;
                           const orderAmount = existingOrderForPayment.total_amount || 0;
-                          const paymentType = newOrder.payment_type || 'COD';
+                          const paymentType =
+                            newOrder.payment_type === 'BANK_TRANSFER' ? 'BANK_TRANSFER' : 'COD';
                           if (paymentType === 'BANK_TRANSFER') {
                             await createPaymentForOrder(orderId, orderNo, paymentType, orderAmount);
                           } else {
